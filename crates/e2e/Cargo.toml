@@ -1,0 +1,20 @@
+[package]
+name = "hydradb-operator-e2e"
+description = "HydraDB end-to-end tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kube.workspace = true
+k8s-openapi.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde-saphyr.workspace = true
+
+[dev-dependencies]
+tower-test.workspace = true
+rand.workspace = true
+sha2.workspace = true

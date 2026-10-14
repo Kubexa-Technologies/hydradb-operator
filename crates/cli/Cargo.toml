@@ -1,0 +1,21 @@
+[package]
+name = "hydradb"
+description = "HydraDB CLI (owns k8s-openapi)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "hydradb"
+path = "src/main.rs"
+
+[dependencies]
+kube.workspace = true
+k8s-openapi.workspace = true
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
