@@ -6,8 +6,8 @@
 //! server gracefully.
 //!
 //! Controllers are registered here as their reconcilers land (todos 18/20/21).
-//! `GraphCluster` (todo 18) and `GraphIndexer` (todo 21) spawn sites exist;
-//! todo 20 adds its own. Wiring them in must not change this module's
+//! `GraphCluster` (todo 18), `GraphNodePool` (todo 20) and `GraphIndexer`
+//! (todo 21) spawn sites exist. Wiring them in must not change this module's
 //! shutdown contract (signal -> stop server -> return `Ok(())`).
 
 use axum::{Router, http::StatusCode, http::header, response::IntoResponse, routing::get};
@@ -37,6 +37,7 @@ pub async fn run() -> Result<(), Error> {
 
     // Controllers are registered here as their reconcilers land (todos 18/20/21).
     let cluster_handle = spawn_graph_cluster_controller(&ctx);
+    let pool_handle = spawn_graph_nodepool_controller(&ctx);
     let indexer_handle = spawn_graph_indexer_controller(&ctx);
 
     // The OTLP layer (if any) is attached in `main::init_tracing` while the
@@ -50,6 +51,7 @@ pub async fn run() -> Result<(), Error> {
         .await
         .map_err(Error::Server)?;
     cluster_handle.abort();
+    pool_handle.abort();
     indexer_handle.abort();
     tracing::info!("shutdown signal received, health server stopped");
     Ok(())
@@ -98,6 +100,49 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
             .for_each(|result| async move {
                 if let Err(error) = result {
                     tracing::warn!(%error, "GraphCluster reconcile stream error");
+                }
+            });
+        running.await;
+    })
+}
+
+/// Spawn the `GraphNodePool` controller (todo 20) as a background task.
+///
+/// Watches `GraphNodePool` objects plus the owned node `StatefulSet`s
+/// (label-filtered by [`crate::apply::CLUSTER_SELECTOR_LABEL`]). Shutdown
+/// mirrors [`spawn_graph_cluster_controller`]: the returned handle is aborted
+/// after the health server stops.
+fn spawn_graph_nodepool_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
+    use futures::StreamExt as _;
+    use k8s_openapi::api::apps::v1::StatefulSet;
+    use kube::Api;
+    use kube::runtime::Controller;
+
+    use crate::apply::CLUSTER_SELECTOR_LABEL;
+
+    let client = ctx.client.clone();
+    let pools = ctx.pools.clone();
+    let context = std::sync::Arc::new(ctx.clone());
+    tokio::spawn(async move {
+        // Version probe runs once here (not per watch); every watch below
+        // shares the cached outcome via the config builders.
+        let support = watcher::probe_watcher_support(&client).await;
+        let owned_selector = CLUSTER_SELECTOR_LABEL;
+        let running = Controller::new(pools, watcher::watcher_config(&support))
+            .owns(
+                Api::<StatefulSet>::all(client.clone()),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .with_config(watcher::controller_config())
+            .shutdown_on_signal()
+            .run(
+                reconcile::nodepool::reconcile,
+                reconcile::nodepool::error_policy,
+                context,
+            )
+            .for_each(|result| async move {
+                if let Err(error) = result {
+                    tracing::warn!(%error, "GraphNodePool reconcile stream error");
                 }
             });
         running.await;
