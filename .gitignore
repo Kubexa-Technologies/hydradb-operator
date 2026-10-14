@@ -1,0 +1,6 @@
+# Rust build output
+target/
+# Backup files from rustc
+**/*.rs.bk
+# Operator evidence (local run artifacts, never committed)
+.omo/evidence/
