@@ -13,5 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+hydradb-operator-api = { path = "../api", version = "0.1.0" }
+k8s-openapi.workspace = true
+kube.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 serde-saphyr.workspace = true
