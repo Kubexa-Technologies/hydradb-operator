@@ -11,9 +11,19 @@ repository.workspace = true
 name = "hydradb-operator"
 path = "src/main.rs"
 
+[features]
+otlp = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+]
+
 [dependencies]
+hydradb-operator-api = { path = "../api", version = "0.1.0" }
 kube.workspace = true
 k8s-openapi.workspace = true
+axum = { workspace = true }
 tokio.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
@@ -24,3 +34,7 @@ serde_json.workspace = true
 futures.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
