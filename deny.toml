@@ -1,0 +1,16 @@
+[advisories]
+yanked = "warn"
+
+[licenses]
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib", # foldhash via kube's rustls/tower stack (hashbrown)
+  "CDLA-Permissive-2.0", # webpki-root-certs via rustls (kube client TLS roots)
+]
+
+[bans]
+wildcards = "deny"

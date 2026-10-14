@@ -1,0 +1,17 @@
+[tasks.fmt]
+run = "cargo fmt --all --check"
+
+[tasks.lint]
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+run = "cargo test --workspace"
+
+[tasks.build]
+run = "cargo build --workspace --release"
+
+[tasks.check-drift]
+run = "cargo xtask gen-all --check"
+
+[tasks.e2e]
+run = "cargo run -p hydradb-operator-e2e"
