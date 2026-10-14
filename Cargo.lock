@@ -901,10 +901,14 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "hydradb-operator-api",
  "k8s-openapi",
  "kube",
  "serde_json",
+ "thiserror",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2914,6 +2918,10 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hydradb-operator-api",
+ "k8s-openapi",
+ "kube",
+ "serde",
  "serde-saphyr 1.3.0",
  "serde_json",
 ]
