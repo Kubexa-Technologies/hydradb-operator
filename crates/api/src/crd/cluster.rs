@@ -15,21 +15,16 @@ use crate::spec::{Image, ObjectStore};
 /// Deletion policy for a `GraphCluster`.
 ///
 /// Todo 8 owns this type; todo 11 owns its schema bounds. Wire values are
-/// PascalCase (`"Retain"` / `"Delete"`). `Retain` is the default via an
-/// explicit [`Default`] impl plus `#[serde(default)]` on the owning field.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// PascalCase (`"Retain"` / `"Delete"`). `Retain` is the default via a
+/// derived [`Default`] impl plus `#[serde(default)]` on the owning field.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 pub enum DeletionPolicy {
     /// Keep backing data on cluster deletion (default).
+    #[default]
     Retain,
     /// Remove backing data on cluster deletion (opt-in).
     Delete,
-}
-
-impl Default for DeletionPolicy {
-    fn default() -> Self {
-        Self::Retain
-    }
 }
 
 /// Graph identity served by the cluster (single-cell only).
