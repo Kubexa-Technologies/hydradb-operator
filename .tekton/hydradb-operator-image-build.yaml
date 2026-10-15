@@ -26,7 +26,9 @@ spec:
             - ReadWriteMany
           resources:
             requests:
-              storage: 1Gi
+              # The inline ci-gate compiles the whole workspace into
+              # <repo>/target, so the checkout volume must hold a Rust build.
+              storage: 10Gi
           storageClassName: ceph-cephfs
     - name: basic-auth
       secret:
@@ -90,9 +92,63 @@ spec:
             workspace: repo
           - name: basic-auth
             workspace: basic-auth
+      - name: ci-gate
+        runAfter:
+          - fetch-source
+        taskSpec:
+          # The same gate the standalone hydradb-operator-ci PipelineRun
+          # applies (see .tekton/hydradb-operator-ci.yaml). Tekton and PaC
+          # have no cross-pipeline dependency, so this pipeline runs the gate
+          # inline rather than duplicating a build: tests first, then image.
+          workspaces:
+            - name: repo
+          steps:
+            - name: rust-checks
+              image: docker.io/library/rust:1.92.0
+              workingDir: $(workspaces.repo.path)
+              script: |
+                #!/bin/sh
+                set -euo pipefail
+                # rust2go/bindgen needs libclang at build time, and every
+                # Tekton step is its own container, so install it here.
+                apt-get update -qq
+                apt-get install -y -qq clang libclang-dev
+                cargo fmt --all --check
+                cargo clippy --workspace --all-targets -- -D warnings
+                cargo test --workspace
+                cargo xtask gen-all --check
+            - name: chart-checks
+              image: docker.io/alpine/helm:3.20.1
+              workingDir: $(workspaces.repo.path)
+              script: |
+                #!/bin/sh
+                set -euo pipefail
+                apk add --no-cache git
+                helm lint --strict charts/hydradb-operator
+                helm plugin install --version v1.2.1 https://github.com/helm-unittest/helm-unittest
+                helm unittest charts/hydradb-operator
+                helm template hydradb-operator charts/hydradb-operator > "$(workspaces.repo.path)/.ci-render.yaml"
+            - name: kubeconform
+              # The official image is FROM scratch: no /bin/sh, so this step
+              # must use command/args and never `script:`.
+              image: ghcr.io/yannh/kubeconform:v0.7.0
+              command: ["/kubeconform"]
+              args:
+                - -strict
+                - -summary
+                - -schema-location
+                - default
+                - -schema-location
+                - https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
+                - -exit-on-error
+                - $(workspaces.repo.path)/.ci-render.yaml
+        workspaces:
+          - name: repo
+            workspace: repo
       - name: build-push
         runAfter:
           - fetch-source
+          - ci-gate
         taskSpec:
           params:
             - name: image-tag

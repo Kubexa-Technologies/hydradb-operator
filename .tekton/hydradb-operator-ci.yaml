@@ -1,0 +1,176 @@
+---
+# SPDX-License-Identifier: Apache-2.0
+#
+# Repo CI gate (todo 56): test before build.
+#
+# Runs the cluster-free half of `scripts/verify.sh` on every PR and on every
+# push that can change code, the chart or the dependency graph. The
+# image-build PipelineRun runs the same gate inline before it builds, so a red
+# tree can never publish an image.
+#
+# Cluster-free by construction: envtest provisions its own
+# kube-apiserver/etcd on first run (honouring KUBEBUILDER_ASSETS when set), so
+# this pipeline needs no kubeconfig and no service account beyond `default`.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: hydradb-operator-ci
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[pull_request, push]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-path-change: "[crates/**, charts/**, Cargo.toml, Cargo.lock, mise.toml, .tekton/hydradb-operator-ci.yaml]"
+spec:
+  params:
+    - name: repo_url
+      value: "{{ repo_url }}"
+    - name: revision
+      value: "{{ revision }}"
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      nodeSelector:
+        site: svt
+  workspaces:
+    # 10Gi, not 1Gi like the image build: the Rust test run compiles the whole
+    # workspace into <repo>/target, which is several GB of debug artifacts.
+    - name: repo
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteMany]
+          storageClassName: ceph-cephfs
+          resources:
+            requests:
+              storage: 10Gi
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
+  timeouts:
+    pipeline: 1h
+  pipelineSpec:
+    params:
+      - name: repo_url
+      - name: revision
+    workspaces:
+      - name: repo
+      - name: basic-auth
+    tasks:
+      - name: fetch-source
+        params:
+          - name: revision
+            value: $(params.revision)
+        workspaces:
+          - name: repo
+            workspace: repo
+          - name: basic-auth
+            workspace: basic-auth
+        taskSpec:
+          params:
+            - name: revision
+          workspaces:
+            - name: repo
+            - name: basic-auth
+          steps:
+            - name: clone
+              image: docker.io/alpine/git:2.54.0
+              script: |
+                set -euo pipefail
+                # PaC mounts its git credentials (pac-gitauth-*) here, bound to the
+                # external FQDN. Pod->gateway->gitea hairpin 503s, so remap the
+                # credential host to the internal service. -c forces this store
+                # file so ambient helpers (creds-init etc.) cannot interfere.
+                CREDS="$(workspaces.basic-auth.path)/.git-credentials"
+                sed -e 's#^https://#http://#' -e 's#@git.kubexa.tech#@gitea-http.gitea:3000#' "$CREDS" > "$HOME/.git-credentials"
+                chmod 600 "$HOME/.git-credentials"
+                export GIT_TERMINAL_PROMPT=0
+                find "$(workspaces.repo.path)" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+                git -c "credential.helper=store --file=$HOME/.git-credentials" clone --depth 1 --no-checkout http://gitea-http.gitea:3000/kubexa-admin/HydraDB-Operator.git "$(workspaces.repo.path)"
+                git -C "$(workspaces.repo.path)" -c "credential.helper=store --file=$HOME/.git-credentials" fetch --depth 1 origin "$(params.revision)"
+                git -C "$(workspaces.repo.path)" checkout FETCH_HEAD
+
+      # The Rust gate is ONE step: every step is its own container, so a package
+      # installed in an earlier step would not exist in this one. `rust:1.92.0`
+      # matches rust-toolchain.toml exactly, so rustup never has to download.
+      - name: rust-checks
+        runAfter:
+          - fetch-source
+        workspaces:
+          - name: repo
+            workspace: repo
+        taskSpec:
+          workspaces:
+            - name: repo
+          steps:
+            - name: gate
+              image: docker.io/library/rust:1.92.0
+              workingDir: $(workspaces.repo.path)
+              script: |
+                set -euo pipefail
+                # rust2go pulls in bindgen, which needs libclang at build time.
+                # libclang is only needed for `cargo` itself, so it is installed
+                # in the same container that runs the build.
+                apt-get update -qq
+                apt-get install -y -qq clang libclang-dev >/dev/null
+                rustc --version
+                echo '==> cargo fmt --all --check'
+                cargo fmt --all --check
+                echo '==> cargo clippy --workspace --all-targets -- -D warnings'
+                cargo clippy --workspace --all-targets -- -D warnings
+                echo '==> cargo test --workspace'
+                # envtest fetches its own kube-apiserver/etcd on first run (or
+                # reuses KUBEBUILDER_ASSETS); a download failure fails the suite
+                # loudly rather than skipping it.
+                cargo test --workspace
+                echo '==> cargo xtask gen-all --check'
+                cargo xtask gen-all --check
+
+      - name: chart-checks
+        runAfter:
+          - fetch-source
+        workspaces:
+          - name: repo
+            workspace: repo
+        taskSpec:
+          workspaces:
+            - name: repo
+          steps:
+            - name: gate
+              image: docker.io/alpine/helm:3.20.1
+              workingDir: $(workspaces.repo.path)
+              script: |
+                set -euo pipefail
+                # alpine/helm ships helm only; helm-unittest is a plugin and
+                # needs git to fetch its repo.
+                apk add --no-cache git >/dev/null
+                helm version --short
+                echo '==> helm lint --strict'
+                helm lint --strict charts/hydradb-operator
+                echo '==> helm unittest'
+                helm plugin install --version v1.2.1 https://github.com/helm-unittest/helm-unittest >/dev/null
+                helm unittest charts/hydradb-operator
+                echo '==> helm template (render for kubeconform)'
+                helm template hydradb-operator charts/hydradb-operator > "$(workspaces.repo.path)/.ci-render.yaml"
+
+      # ghcr.io/yannh/kubeconform is `FROM scratch`: it has no /bin/sh, so this
+      # step MUST use command/args and never `script:`.
+      - name: kubeconform
+        runAfter:
+          - chart-checks
+        workspaces:
+          - name: repo
+            workspace: repo
+        taskSpec:
+          workspaces:
+            - name: repo
+          steps:
+            - name: validate
+              image: ghcr.io/yannh/kubeconform:v0.7.0
+              command: ["/kubeconform"]
+              args:
+                - "-strict"
+                - "-summary"
+                - "-schema-location"
+                - "default"
+                - "-schema-location"
+                - "https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
+                - "-exit-on-error"
+                - "$(workspaces.repo.path)/.ci-render.yaml"
