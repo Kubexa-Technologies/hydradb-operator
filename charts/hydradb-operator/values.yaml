@@ -1,0 +1,51 @@
+# Default values for hydradb-operator.
+# -- Operator container image repository (registry + path).
+image:
+  # -- Operator container image repository (registry + path).
+  repository: harbor.kubexa.tech/oss/hydradb-operator
+  # -- Operator container image tag (pinned semver; never "latest").
+  tag: v0.1.0
+  # -- Pinned image digest (sha256 hex without the "sha256:" prefix); empty means tag only.
+  digest: ""
+  # -- Image pull policy (IfNotPresent, Always, or Never).
+  pullPolicy: IfNotPresent
+  # -- Image pull secrets for private registries.
+  pullSecrets: []
+# -- Number of operator Deployment replicas.
+replicaCount: 1
+# -- Operator container resource requests and limits.
+resources:
+  # -- CPU resource requests.
+  requests:
+    # -- CPU request.
+    cpu: 100m
+    # -- Memory request.
+    memory: 128Mi
+  # -- CPU resource limits.
+  limits:
+    # -- CPU limit.
+    cpu: 500m
+    # -- Memory limit.
+    memory: 512Mi
+# -- Node selector constraints for operator pods.
+nodeSelector: {}
+# -- Toleration rules for operator pods.
+tolerations: []
+# -- Affinity rules for operator pods.
+affinity: {}
+# -- Operator watch scope: "namespaced" watches OPERATOR_NAMESPACE only, "cluster" watches all namespaces.
+installScope: namespaced
+# -- Monitoring integration settings.
+monitoring:
+  # -- Prometheus ServiceMonitor settings.
+  serviceMonitor:
+    # -- Enable creation of a ServiceMonitor for the operator metrics endpoint.
+    enabled: false
+# -- Custom Resource Definition handling.
+crds:
+  # -- Install CRDs from charts/hydradb-operator/crds on install/upgrade.
+  install: true
+# -- Log verbosity settings.
+log:
+  # -- Tracing/logging filter directive (RUST_LOG format).
+  level: info

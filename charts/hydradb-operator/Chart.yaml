@@ -1,0 +1,36 @@
+apiVersion: v2
+name: hydradb-operator
+description: HydraDB Kubernetes operator (kube-rs) reconciling GraphCluster, GraphNodePool, and GraphIndexer resources
+type: application
+version: 0.1.0
+appVersion: 0.1.0
+kubeVersion: ">=1.26.0-0"
+home: https://git.kubexa.tech/oss/hydradb-operator
+icon: file://icon.svg
+sources:
+  - https://git.kubexa.tech/oss/hydradb-operator
+  - https://helmforge.dev
+maintainers:
+  - name: helmforge
+    url: https://helmforge.dev
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial chart release
+  artifacthub.io/displayName: hydradb-operator
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Source
+      url: https://git.kubexa.tech/oss/hydradb-operator
+    - name: Docs
+      url: https://git.kubexa.tech/oss/hydradb-operator
+  artifacthub.io/operator: "true"
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/recommended-permissions: |
+    ClusterRole hydradb-operator is required; see deploy/rbac/operator-clusterrole.yaml
+  helmforge.dev/maturity: experimental
+  helmforge.dev/signed: gpg+cosign
+  helmforge.dev/repository: oci://harbor.kubexa.tech/oss/hydradb-operator
+signKey:
+  fingerprint: TODO-GPG-FINGERPRINT
+  url: TODO-SIGNKEY-URL
