@@ -158,4 +158,14 @@ spec:
         runAfter:
           - build-push
         taskRef:
-          name: eso-force-sync
+          resolver: cluster
+          params:
+            - name: kind
+              value: task
+            - name: name
+              value: eso-force-sync
+            - name: namespace
+              value: tekton-tasks
+        params:
+          - name: namespaces
+            value: tekton-tasks
