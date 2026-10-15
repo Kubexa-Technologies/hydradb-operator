@@ -2,5 +2,7 @@
 target/
 # Backup files from rustc
 **/*.rs.bk
-# Operator evidence (local run artifacts, never committed)
-.omo/evidence/
+# Agent work artifacts (plans, notepads, evidence, run state - local only, never committed)
+.omo/
+# Local opencode state
+.opencode/
