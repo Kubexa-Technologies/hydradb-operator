@@ -1,3 +1,22 @@
 target/
 .git/
 .omo/
+# Local-only caches and indexes: never part of the build context.
+.codebase-memory/
+# Export staging dir for prebuilt binaries (used only as --build-context bin=).
+dist/
+# Heavy / irrelevant context: never needed by the Rust build stages.
+charts/
+docs/
+deploy/
+terraform/
+# Editor / OS cruft.
+**/*.rs.bk
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+# NOTE: Cargo.toml, Cargo.lock, crates/**, rust-toolchain.toml and .cargo/
+# are DELIBERATELY not ignored — the planner/chef/builder stages need them.
