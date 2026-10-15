@@ -109,7 +109,7 @@ spec:
                 # libclang is only needed for `cargo` itself, so it is installed
                 # in the same container that runs the build.
                 apt-get update -qq
-                apt-get install -y -qq clang libclang-dev >/dev/null
+                apt-get install -y -qq ca-certificates clang libclang-dev >/dev/null
                 rustc --version
                 echo '==> cargo fmt --all --check'
                 cargo fmt --all --check

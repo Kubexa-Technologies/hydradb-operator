@@ -112,7 +112,7 @@ spec:
                 # rust2go/bindgen needs libclang at build time, and every
                 # Tekton step is its own container, so install it here.
                 apt-get update -qq
-                apt-get install -y -qq clang libclang-dev
+                apt-get install -y -qq ca-certificates clang libclang-dev
                 cargo fmt --all --check
                 cargo clippy --workspace --all-targets -- -D warnings
                 cargo test --workspace
