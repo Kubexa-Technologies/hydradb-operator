@@ -130,6 +130,14 @@ spec:
                 # read-only over that path.
                 apt-get update -qq
                 apt-get install -y -qq clang libclang-dev >/dev/null
+                # The image's pinned toolchain ships neither rustfmt nor clippy
+                # (rust-toolchain.toml asks for both, profile = minimal), so add
+                # them to that exact toolchain.
+                rustup component add rustfmt clippy
+                # The image's pinned toolchain ships neither rustfmt nor clippy;
+                # add them. The mounted CA bundle (SSL_CERT_FILE) makes the
+                # download from static.rust-lang.org work.
+                rustup component add rustfmt clippy
                 rustc --version
                 echo '==> cargo fmt --all --check'
                 cargo fmt --all --check
