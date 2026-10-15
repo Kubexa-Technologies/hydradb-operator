@@ -657,12 +657,17 @@ async fn write_status_if_changed(
     api.patch_status(
         name,
         &PatchParams::default(),
+        // Wrapped in `status`: the `/status` subresource endpoint drops a
+        // bare field patch silently (proven by the envtest suite, todo 26),
+        // while the wrapped form persists exactly.
         &Patch::Merge(serde_json::json!({
-            "conditions": desired.conditions,
-            "observedGeneration": desired.observed_generation,
-            "readyReplicas": desired.ready_replicas,
-            "currentReplicas": desired.current_replicas,
-            "boltAddresses": desired.bolt_addresses,
+            "status": {
+                "conditions": desired.conditions,
+                "observedGeneration": desired.observed_generation,
+                "readyReplicas": desired.ready_replicas,
+                "currentReplicas": desired.current_replicas,
+                "boltAddresses": desired.bolt_addresses,
+            }
         })),
     )
     .await

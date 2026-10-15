@@ -7,18 +7,12 @@
 //! harmless no-op under `kubectl exec` probes and `--help` checks; there is
 //! deliberately no CLI framework here (see `crates/cli` for the `hydradb`
 //! command).
+//!
+//! All reconciler modules live in the library (`src/lib.rs`) so the
+//! `tests/` suites can drive them; this binary only installs tracing and
+//! calls [`hydradb_operator::run::run`].
 
-mod apply;
-mod conditions;
-mod context;
-mod error;
-mod finalizer;
-mod metrics;
-mod reconcile;
-mod run;
-mod status;
-mod watcher;
-
+use hydradb_operator::run;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Install tracing, then run until shutdown or a fatal startup error.

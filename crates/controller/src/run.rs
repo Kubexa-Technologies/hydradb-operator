@@ -289,7 +289,7 @@ async fn fallback_404() -> impl IntoResponse {
 /// plus `None`. The endpoint value is never logged — it may carry auth
 /// material in userinfo or query parameters.
 #[cfg(feature = "otlp")]
-pub(crate) fn init_otlp()
+pub fn init_otlp()
 -> Option<Box<dyn tracing_subscriber::layer::Layer<tracing_subscriber::Registry> + Send + Sync>> {
     use opentelemetry::trace::TracerProvider as _;
     use opentelemetry_otlp::WithExportConfig as _;
@@ -319,7 +319,7 @@ pub(crate) fn init_otlp()
 
 /// No-op without the `otlp` feature: no OTLP code is linked.
 #[cfg(not(feature = "otlp"))]
-pub(crate) fn init_otlp()
+pub fn init_otlp()
 -> Option<Box<dyn tracing_subscriber::layer::Layer<tracing_subscriber::Registry> + Send + Sync>> {
     None
 }

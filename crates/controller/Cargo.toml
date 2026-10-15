@@ -38,3 +38,8 @@ opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
+
+[dev-dependencies]
+tower-test.workspace = true
+envtest.workspace = true
+http = "1"
