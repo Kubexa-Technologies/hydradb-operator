@@ -34,10 +34,11 @@
 //! `GRAPH_SLATE_DB_CACHE_BYTES` with the underscore); they are defined ONCE
 //! here so no literal is re-typed at the call sites.
 //!
-//! TODO(todo-23): wrap [`reconcile`] in `finalizer::...` (the
-//! `kube::runtime::finalizer` wrapper with `hydradb.helmforge.dev/finalizer`
-//! and the `deletionPolicy` handling). Todo 23 owns `finalizer.rs`; this
-//! module must NOT implement it.
+//! Finalizer wiring (todo 65): [`reconcile`] calls
+//! `finalizer::with_finalizer` as its ONLY top-level action, stamping
+//! [`constants::FINALIZER`] via `kube::runtime::finalizer`. The
+//! previous apply body is the `Apply` closure; [`cleanup_cluster`] is the
+//! `Cleanup` closure and enforces `spec.deletionPolicy` (`Retain` default).
 //!
 //! Services and the Bolt routing table (todo 19): the five Services mirror
 //! the upstream chart's `services.yaml` shapes (headless `clusterIP: None`
@@ -51,7 +52,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hydradb_operator_api::constants;
-use hydradb_operator_api::crd::{GraphCluster, GraphClusterStatus};
+use hydradb_operator_api::crd::{DeletionPolicy, GraphCluster, GraphClusterStatus};
 use hydradb_operator_api::spec::{PhaseLabel as _, S3};
 use hydradb_operator_api::validation::ValidationError;
 use k8s_openapi::ByteString;
@@ -60,7 +61,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::Resource as _;
 use kube::ResourceExt as _;
-use kube::api::{Api, ListParams, Patch, PatchParams};
+use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams};
 use kube::runtime::controller::Action;
 
 use crate::apply::{
@@ -937,29 +938,179 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
 
 /// Reconcile one `GraphCluster` (controller entrypoint).
 ///
-/// TODO(todo-23): wrap this reconcile in `finalizer::...` — the
-/// `kube::runtime::finalizer` wrapper owning
-/// `hydradb.helmforge.dev/finalizer` plus `deletionPolicy`. This function
-/// stays the inner reconcile; todo 23 owns the wrapper and `finalizer.rs`.
+/// The ONLY top-level action is `finalizer::with_finalizer` stamping
+/// [`constants::FINALIZER`]: the previous apply body runs as the `Apply`
+/// closure and [`cleanup_cluster`] as the `Cleanup` closure, so
+/// `spec.deletionPolicy` is enforced on every delete.
 ///
 /// # Errors
 ///
 /// Returns [`Error`] when validation, resolution, child SSA or the status
 /// write fails; the controller maps it through [`error_policy`].
 pub async fn reconcile(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Action, Error> {
-    // TODO(todo-23): wrap this reconcile in finalizer::with_finalizer (see the
-    // module docs); the wrapper arrives with todo 23, not here.
-    let span = metrics::reconcile_span(
-        "GraphCluster",
-        &cluster.namespace().unwrap_or_default(),
-        &cluster.name_any(),
-    );
-    let _entered = span.enter();
-    let start = Instant::now();
-    let outcome = reconcile_inner(cluster, ctx).await;
-    let recorded: Result<(), ErrorClass> = outcome.as_ref().map(|_| ()).map_err(Error::class);
-    metrics::record_reconcile("GraphCluster", start.elapsed(), recorded);
-    outcome
+    let namespace = cluster.namespace().unwrap_or_default();
+    let api: Api<GraphCluster> = Api::namespaced(ctx.client.clone(), &namespace);
+    let apply_ctx = ctx.clone();
+    let cleanup_ctx = ctx.clone();
+    crate::finalizer::with_finalizer(
+        &api,
+        cluster,
+        |obj| async move {
+            let span = metrics::reconcile_span(
+                "GraphCluster",
+                &obj.namespace().unwrap_or_default(),
+                &obj.name_any(),
+            );
+            let _entered = span.enter();
+            let start = Instant::now();
+            let outcome = reconcile_inner(obj, apply_ctx).await;
+            let recorded: Result<(), ErrorClass> =
+                outcome.as_ref().map(|_| ()).map_err(Error::class);
+            metrics::record_reconcile("GraphCluster", start.elapsed(), recorded);
+            outcome
+        },
+        |obj| async move { cleanup_cluster(obj, cleanup_ctx).await },
+    )
+    .await
+}
+
+/// Effective `deletionPolicy` for the cluster: the spec field, which defaults
+/// to `Retain` via `#[serde(default)]` when unset.
+#[must_use]
+pub fn deletion_policy_of(cluster: &GraphCluster) -> DeletionPolicy {
+    cluster.spec.deletion_policy.clone()
+}
+
+/// Audit reason stamped to `pruned-by`: the policy name verbatim.
+#[must_use]
+pub fn policy_reason(policy: &DeletionPolicy) -> &'static str {
+    match policy {
+        DeletionPolicy::Retain => "Retain",
+        DeletionPolicy::Delete => "Delete",
+    }
+}
+
+/// Whether the object store is reachable enough to attempt prefix deletion.
+///
+/// Explicit spec input counts as reachable; an OBC claim counts as reachable
+/// only while its generated Secret and ConfigMap both exist. Anything else
+/// (no source, missing claim objects) is unreachable, so the cleanup plan
+/// omits the data-prefix step and deletion never blocks on the store.
+async fn store_is_reachable(
+    cluster: &GraphCluster,
+    ctx: &Ctx,
+    namespace: &str,
+) -> Result<bool, Error> {
+    if cluster.spec.object_store.explicit.is_some() {
+        return Ok(true);
+    }
+    let Some(claim) = cluster.spec.object_store.object_bucket_claim.clone() else {
+        return Ok(false);
+    };
+    let secrets = Api::<Secret>::namespaced(ctx.client.clone(), namespace);
+    let configmaps = Api::<ConfigMap>::namespaced(ctx.client.clone(), namespace);
+    let secret = secrets
+        .get_opt(&claim.name)
+        .await
+        .map_err(Error::from_kube_error)?;
+    let configmap = configmaps
+        .get_opt(&claim.name)
+        .await
+        .map_err(Error::from_kube_error)?;
+    Ok(secret.is_some() && configmap.is_some())
+}
+
+/// Delete every operator-owned child of the cluster, tolerating 404s.
+///
+/// The auth Secret is deleted only when the operator created it (inline token
+/// or generated): an `existingSecret` passthrough belongs to the user and is
+/// never touched. A 404 from any delete is success (never-applied CR); any
+/// other failure aborts so the delete is retried.
+async fn delete_cluster_children(
+    client: kube::Client,
+    namespace: &str,
+    cluster: &GraphCluster,
+) -> Result<(), Error> {
+    let name = cluster.name_any();
+    let params = DeleteParams::default();
+    let configmaps = Api::<ConfigMap>::namespaced(client.clone(), namespace);
+    let _ = configmaps
+        .delete(&cluster_child_name(&name, ROLE_CONFIG), &params)
+        .await
+        .map_err(Error::from_kube_error)?;
+    if !matches!(plan_auth(cluster, None), Ok(AuthPlan::Reference { .. })) {
+        let secrets = Api::<Secret>::namespaced(client.clone(), namespace);
+        let _ = secrets
+            .delete(&cluster_child_name(&name, ROLE_AUTH), &params)
+            .await
+            .map_err(Error::from_kube_error)?;
+    }
+    let services = Api::<Service>::namespaced(client, namespace);
+    for service in [
+        headless_service_name(&name),
+        indexer_metrics_service_name(&name),
+        cluster_child_name(&name, ROLE_BOLT),
+        cluster_child_name(&name, ROLE_HTTPS),
+        cluster_child_name(&name, ROLE_METRICS),
+    ] {
+        let _ = services
+            .delete(&service, &params)
+            .await
+            .map_err(Error::from_kube_error)?;
+    }
+    Ok(())
+}
+
+/// `Cleanup` closure for [`reconcile`]: enforce `spec.deletionPolicy`.
+///
+/// `Retain` (default) stamps `pruned-by` and removes children, leaving
+/// object-store data intact. `Delete` additionally plans the cluster-scoped
+/// data-prefix removal; the prefix hook records the exact prefix and releases
+/// the finalizer because this crate ships no object-store client (adding one
+/// needs a new dependency, forbidden to this row), while an unreachable store
+/// omits the step entirely so deletion still terminates.
+async fn cleanup_cluster(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Action, Error> {
+    let name = cluster.name_any();
+    let namespace = cluster.namespace().unwrap_or_default();
+    let policy = deletion_policy_of(&cluster);
+    let reason = policy_reason(&policy);
+    let client = ctx.client.clone();
+    let selector = format!("{}={name}", crate::apply::CLUSTER_SELECTOR_LABEL);
+    let list = ListParams::default().labels(&selector);
+    let owned_configmaps = Api::<ConfigMap>::namespaced(client.clone(), &namespace)
+        .list(&list)
+        .await
+        .map_err(Error::from_kube_error)?;
+    let owned_secrets = Api::<Secret>::namespaced(client.clone(), &namespace)
+        .list(&list)
+        .await
+        .map_err(Error::from_kube_error)?;
+    let owned_services = Api::<Service>::namespaced(client.clone(), &namespace)
+        .list(&list)
+        .await
+        .map_err(Error::from_kube_error)?;
+    let children_exist = !owned_configmaps.items.is_empty()
+        || !owned_secrets.items.is_empty()
+        || !owned_services.items.is_empty();
+    let store_reachable = store_is_reachable(&cluster, &ctx, &namespace).await?;
+    let plan = crate::finalizer::cleanup_plan(&policy, children_exist, store_reachable, &name);
+    let cr_api: Api<GraphCluster> = Api::namespaced(client.clone(), &namespace);
+    crate::finalizer::execute_cleanup(
+        &plan,
+        || crate::finalizer::stamp_pruned_by(&cr_api, &name, reason),
+        || delete_cluster_children(client.clone(), &namespace, &cluster),
+        |prefix| async move {
+            tracing::warn!(
+                prefix,
+                reason,
+                "no object-store client in this crate; leaving the data prefix and releasing \
+                 the finalizer (physical prefix removal needs a store client)"
+            );
+            Ok::<(), Error>(())
+        },
+    )
+    .await?;
+    Ok(Action::await_change())
 }
 
 /// Map a reconcile failure to a requeue delay via [`Error::class`].
@@ -1465,5 +1616,120 @@ mod tests {
                 );
             }
         }
+    }
+
+    const RECONCILE_SOURCE: &str = include_str!("cluster.rs");
+
+    #[test]
+    fn reconcile_wraps_everything_in_the_shared_finalizer() {
+        assert!(
+            RECONCILE_SOURCE.contains("finalizer::with_finalizer"),
+            "reconcile must call finalizer::with_finalizer as its top-level action"
+        );
+        // The production half of this file (everything before the test
+        // module) must never spell the finalizer string: the name comes from
+        // `constants::FINALIZER`. The assertion below necessarily names the
+        // literal, so only the pre-test half is scanned.
+        let production = RECONCILE_SOURCE
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(RECONCILE_SOURCE);
+        assert!(
+            !production.contains("hydradb.helmforge.dev/finalizer"),
+            "the finalizer name must come from constants::FINALIZER, never a literal"
+        );
+        assert_eq!(
+            crate::finalizer::finalizer_name(),
+            constants::FINALIZER,
+            "the wired finalizer must be exactly the shared constant"
+        );
+    }
+
+    #[test]
+    fn deletion_policy_defaults_to_retain_when_the_field_is_unset() {
+        let cluster: GraphCluster = serde_json::from_value(serde_json::json!({
+            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "kind": "GraphCluster",
+            "metadata": {"name": "demo", "namespace": "default", "uid": "abc-123"},
+            "spec": {
+                "image": {"repository": "example.com/hydradb"},
+                "graph": {"namespace": "ns", "id": "g", "database": "db", "cellId": "c0"},
+                "objectStore": {
+                    "explicit": {"bucket": "my-bucket", "region": "us-east-1"}
+                },
+                "auth": {"generate": true}
+            }
+        }))
+        .expect("fixture without deletionPolicy must deserialize");
+        assert_eq!(
+            deletion_policy_of(&cluster),
+            DeletionPolicy::Retain,
+            "an unset deletionPolicy must default to Retain"
+        );
+        assert_eq!(policy_reason(&DeletionPolicy::Retain), "Retain");
+        assert_eq!(policy_reason(&DeletionPolicy::Delete), "Delete");
+    }
+
+    #[tokio::test]
+    async fn retain_cleanup_stamps_first_and_leaves_data_intact() {
+        use crate::finalizer::{CleanupAction, cleanup_plan, execute_cleanup};
+        use std::sync::Mutex;
+
+        let cluster = cluster_fixture();
+        let policy = deletion_policy_of(&cluster);
+        assert_eq!(policy, DeletionPolicy::Retain);
+        let plan = cleanup_plan(&policy, true, true, "demo");
+        assert!(
+            plan.iter()
+                .all(|action| !matches!(action, CleanupAction::DeleteDataPrefix { .. })),
+            "Retain must never plan data-prefix removal"
+        );
+        let order = Mutex::new(Vec::new());
+        execute_cleanup(
+            &plan,
+            || async { Ok(()) },
+            || {
+                order.lock().expect("order log unlocks").push("children");
+                async { Ok(()) }
+            },
+            |prefix: String| async move {
+                panic!("Retain must never invoke the prefix hook, got: {prefix}");
+                #[allow(unreachable_code)]
+                Ok::<(), Error>(())
+            },
+        )
+        .await
+        .expect("retain cleanup must succeed");
+        assert_eq!(
+            order.lock().expect("order log unlocks").as_slice(),
+            ["children"],
+            "children deletion must run after the stamp step"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_of_a_never_applied_cr_returns_ok_without_touching_children_or_store() {
+        use crate::finalizer::{cleanup_plan, execute_cleanup};
+
+        let cluster = cluster_fixture();
+        let policy = deletion_policy_of(&cluster);
+        let plan = cleanup_plan(&policy, false, false, "demo");
+        assert_eq!(plan.len(), 1, "nothing applied means stamp only");
+        execute_cleanup(
+            &plan,
+            || async { Ok(()) },
+            || async {
+                panic!("no children exist; the child hook must never fire");
+                #[allow(unreachable_code)]
+                Ok::<(), Error>(())
+            },
+            |_: String| async {
+                panic!("no prefix step exists; the store hook must never fire");
+                #[allow(unreachable_code)]
+                Ok::<(), Error>(())
+            },
+        )
+        .await
+        .expect("never-applied cleanup must return Ok, never panic");
     }
 }

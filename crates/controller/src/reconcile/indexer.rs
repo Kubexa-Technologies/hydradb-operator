@@ -18,14 +18,23 @@
 //! `Ready=False`/`Disabled`. The indexer is stateless: NEVER a PVC or
 //! `volumeClaimTemplates` here, and no schedule/cron field exists.
 //!
-//! TODO(todo-65): finalizer wiring. TODO(todo-22): PDB/NetworkPolicy/
+//! Finalizer wiring (todo 65): [`reconcile`] calls
+//! `finalizer::with_finalizer` as its ONLY top-level action, stamping
+//! [`constants::FINALIZER`] via `kube::runtime::finalizer`. The previous
+//! apply body is the `Apply` closure; [`cleanup_indexer`] is the `Cleanup`
+//! closure. The indexer owns no object-store data, so cleanup stamps
+//! `pruned-by` and removes the `Deployment` under the owning cluster's
+//! `deletionPolicy` (`Retain` when the cluster reference is empty or
+//! unresolvable), and never plans a data-prefix step.
+//!
+//! TODO(todo-22): PDB/NetworkPolicy/
 //! ServiceMonitor. This module must NOT implement either.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hydradb_operator_api::constants;
-use hydradb_operator_api::crd::{GraphCluster, GraphIndexer, GraphIndexerStatus};
+use hydradb_operator_api::crd::{DeletionPolicy, GraphCluster, GraphIndexer, GraphIndexerStatus};
 use hydradb_operator_api::spec::{BuildMode, Image, PhaseLabel};
 use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec};
 use k8s_openapi::api::core::v1::{
@@ -38,10 +47,10 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, 
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::Resource as _;
 use kube::ResourceExt as _;
-use kube::api::{Api, Patch, PatchParams};
+use kube::api::{Api, DeleteParams, Patch, PatchParams};
 use kube::runtime::controller::Action;
 
-use super::cluster::{DEFAULT_AUTH_KEY, SUCCESS_REQUEUE_SECS};
+use super::cluster::{DEFAULT_AUTH_KEY, SUCCESS_REQUEUE_SECS, policy_reason};
 use crate::apply::{
     ROLE_AUTH, ROLE_CONFIG, apply_child, cluster_child_name, indexer_child_name, standard_labels,
 };
@@ -546,9 +555,6 @@ async fn write_status_if_changed(
 /// The cluster resolves via `spec.clusterRef`; a missing cluster is a
 /// structural error (requeue), never a panic.
 ///
-/// TODO(todo-65): wrap this reconcile in the finalizer wrapper. This function
-/// stays the inner reconcile.
-///
 /// # Errors
 ///
 /// Returns [`Error`] when the cluster reference is unresolvable, the child SSA
@@ -605,22 +611,153 @@ async fn reconcile_inner(indexer: Arc<GraphIndexer>, ctx: Arc<Ctx>) -> Result<Ac
 
 /// Reconcile one `GraphIndexer` (controller entrypoint).
 ///
+/// The ONLY top-level action is `finalizer::with_finalizer` stamping
+/// [`constants::FINALIZER`]: the previous apply body runs as the `Apply`
+/// closure and [`cleanup_indexer`] as the `Cleanup` closure, so the owning
+/// cluster's `deletionPolicy` is honoured on every delete.
+///
 /// # Errors
 ///
 /// Returns [`Error`] when resolution, child SSA or the status write fails;
 /// the controller maps it through [`error_policy`].
 pub async fn reconcile(indexer: Arc<GraphIndexer>, ctx: Arc<Ctx>) -> Result<Action, Error> {
-    let span = metrics::reconcile_span(
-        "GraphIndexer",
-        &indexer.namespace().unwrap_or_default(),
-        &indexer.name_any(),
-    );
-    let _entered = span.enter();
-    let start = Instant::now();
-    let outcome = reconcile_inner(indexer, ctx).await;
-    let recorded: Result<(), ErrorClass> = outcome.as_ref().map(|_| ()).map_err(Error::class);
-    metrics::record_reconcile("GraphIndexer", start.elapsed(), recorded);
-    outcome
+    let namespace = indexer.namespace().unwrap_or_default();
+    let api: Api<GraphIndexer> = Api::namespaced(ctx.client.clone(), &namespace);
+    let apply_ctx = ctx.clone();
+    let cleanup_ctx = ctx.clone();
+    crate::finalizer::with_finalizer(
+        &api,
+        indexer,
+        |obj| async move {
+            let span = metrics::reconcile_span(
+                "GraphIndexer",
+                &obj.namespace().unwrap_or_default(),
+                &obj.name_any(),
+            );
+            let _entered = span.enter();
+            let start = Instant::now();
+            let outcome = reconcile_inner(obj, apply_ctx).await;
+            let recorded: Result<(), ErrorClass> =
+                outcome.as_ref().map(|_| ()).map_err(Error::class);
+            metrics::record_reconcile("GraphIndexer", start.elapsed(), recorded);
+            outcome
+        },
+        |obj| async move { cleanup_indexer(obj, cleanup_ctx).await },
+    )
+    .await
+}
+
+/// Effective `deletionPolicy` for the indexer: the owning cluster's policy.
+///
+/// The indexer spec carries no policy field of its own. An empty `clusterRef`
+/// or an unresolvable owning cluster means `Retain`: cleanup must never block
+/// deletion on a reference it cannot read.
+///
+/// # Errors
+///
+/// Returns [`Error::Api`] when the apiserver rejects the cluster read.
+async fn resolve_deletion_policy(
+    indexer: &GraphIndexer,
+    ctx: &Ctx,
+    namespace: &str,
+) -> Result<DeletionPolicy, Error> {
+    let cluster_name = indexer.spec.cluster_ref.name.clone();
+    if cluster_name.is_empty() {
+        return Ok(DeletionPolicy::Retain);
+    }
+    let clusters = Api::<GraphCluster>::namespaced(ctx.client.clone(), namespace);
+    let cluster = clusters
+        .get_opt(&cluster_name)
+        .await
+        .map_err(Error::from_kube_error)?;
+    Ok(policy_from_lookup(cluster.as_ref()))
+}
+
+/// Map an owning-cluster lookup onto the effective policy: the cluster's own
+/// `deletionPolicy`, or `Retain` when the lookup found nothing.
+///
+/// Pure so the `Retain`-default contract stays unit-testable without a
+/// cluster.
+#[must_use]
+fn policy_from_lookup(cluster: Option<&GraphCluster>) -> DeletionPolicy {
+    cluster.map_or(DeletionPolicy::Retain, |cluster| {
+        cluster.spec.deletion_policy.clone()
+    })
+}
+
+/// Ordered cleanup actions for indexer deletion (pure): stamp first, children
+/// iff they exist, and never a data-prefix step — the indexer owns no
+/// object-store data, so the store always counts as unreachable here.
+///
+/// Pure so the never-delete-data contract stays unit-testable without a
+/// cluster.
+#[must_use]
+fn indexer_cleanup_plan(
+    policy: &DeletionPolicy,
+    children_exist: bool,
+    indexer_name: &str,
+) -> Vec<crate::finalizer::CleanupAction> {
+    crate::finalizer::cleanup_plan(policy, children_exist, false, indexer_name)
+}
+
+/// Delete the indexer-owned `Deployment`, tolerating 404s.
+///
+/// The `Deployment` is the indexer's only direct child. A 404 surfaces as
+/// [`Error::Api`] and is treated as success by
+/// [`crate::finalizer::execute_cleanup`], so a never-applied indexer cleans
+/// up without touching anything else.
+async fn delete_indexer_children(
+    client: kube::Client,
+    namespace: &str,
+    indexer: &GraphIndexer,
+) -> Result<(), Error> {
+    let name = indexer.name_any();
+    let deployments = Api::<Deployment>::namespaced(client, namespace);
+    let _ = deployments
+        .delete(&indexer_child_name(&name), &DeleteParams::default())
+        .await
+        .map_err(Error::from_kube_error)?;
+    Ok(())
+}
+
+/// `Cleanup` closure for [`reconcile`]: honour the owning cluster's
+/// `deletionPolicy`.
+///
+/// `Retain` (and an empty/unresolvable `clusterRef`, which defaults to
+/// `Retain`) stamps `pruned-by` and removes the `Deployment`, leaving
+/// object-store data intact. `Delete` stamps the `Delete` reason with the
+/// same child plan; the data-prefix step is always omitted because the
+/// indexer owns no object-store data, so deletion never blocks on the store.
+async fn cleanup_indexer(indexer: Arc<GraphIndexer>, ctx: Arc<Ctx>) -> Result<Action, Error> {
+    let name = indexer.name_any();
+    let namespace = indexer.namespace().unwrap_or_default();
+    let policy = resolve_deletion_policy(&indexer, &ctx, &namespace).await?;
+    let reason = policy_reason(&policy);
+    let client = ctx.client.clone();
+    let deployments = Api::<Deployment>::namespaced(client.clone(), &namespace);
+    let children_exist = deployments
+        .get_opt(&indexer_child_name(&name))
+        .await
+        .map_err(Error::from_kube_error)?
+        .is_some();
+    let plan = indexer_cleanup_plan(&policy, children_exist, &name);
+    let indexers_api: Api<GraphIndexer> = Api::namespaced(client.clone(), &namespace);
+    crate::finalizer::execute_cleanup(
+        &plan,
+        || crate::finalizer::stamp_pruned_by(&indexers_api, &name, reason),
+        || delete_indexer_children(client.clone(), &namespace, &indexer),
+        |prefix| async move {
+            tracing::warn!(
+                prefix,
+                reason,
+                "no object-store client in this crate; leaving the data prefix and releasing \
+                 the finalizer (physical prefix removal needs a store client)"
+            );
+            Ok::<(), Error>(())
+        },
+    )
+    .await?;
+    Ok(Action::await_change())
 }
 
 /// Map a reconcile failure to a requeue delay via [`Error::class`].
@@ -882,5 +1019,140 @@ mod tests {
                 );
             }
         }
+    }
+
+    const RECONCILE_SOURCE: &str = include_str!("indexer.rs");
+
+    #[test]
+    fn reconcile_wraps_everything_in_the_shared_finalizer() {
+        assert!(
+            RECONCILE_SOURCE.contains("finalizer::with_finalizer"),
+            "reconcile must call finalizer::with_finalizer as its top-level action"
+        );
+        // The production half of this file (everything before the test
+        // module) must never spell the finalizer string: the name comes from
+        // `constants::FINALIZER`. The assertion below necessarily names the
+        // literal, so only the pre-test half is scanned.
+        let production = RECONCILE_SOURCE
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(RECONCILE_SOURCE);
+        assert!(
+            !production.contains("hydradb.helmforge.dev/finalizer"),
+            "the finalizer name must come from constants::FINALIZER, never a literal"
+        );
+        assert_eq!(
+            crate::finalizer::finalizer_name(),
+            constants::FINALIZER,
+            "the wired finalizer must be exactly the shared constant"
+        );
+    }
+
+    #[test]
+    fn missing_cluster_means_retain_never_delete() {
+        assert_eq!(
+            policy_from_lookup(None),
+            DeletionPolicy::Retain,
+            "an unresolvable owning cluster must default to Retain"
+        );
+        let mut cluster = cluster_fixture();
+        assert_eq!(
+            policy_from_lookup(Some(&cluster)),
+            DeletionPolicy::Retain,
+            "an unset deletionPolicy on the cluster must default to Retain"
+        );
+        cluster.spec.deletion_policy = DeletionPolicy::Delete;
+        assert_eq!(
+            policy_from_lookup(Some(&cluster)),
+            DeletionPolicy::Delete,
+            "an explicit Delete on the cluster must flow through"
+        );
+    }
+
+    #[tokio::test]
+    async fn retain_cleanup_stamps_first_and_leaves_data_intact() {
+        use crate::finalizer::{CleanupAction, execute_cleanup};
+        use std::sync::Mutex;
+
+        let plan = indexer_cleanup_plan(&DeletionPolicy::Retain, true, "demo-indexer");
+        assert!(
+            plan.iter()
+                .all(|action| !matches!(action, CleanupAction::DeleteDataPrefix { .. })),
+            "Retain must never plan data-prefix removal"
+        );
+        match plan.first() {
+            Some(CleanupAction::StampPrunedBy { reason }) => {
+                assert_eq!(reason, "Retain", "the stamp must name the Retain policy")
+            }
+            other => panic!("stamp must lead every plan, got: {other:?}"),
+        }
+        let order = Mutex::new(Vec::new());
+        execute_cleanup(
+            &plan,
+            || async { Ok(()) },
+            || {
+                order.lock().expect("order log unlocks").push("children");
+                async { Ok(()) }
+            },
+            |prefix: String| async move {
+                panic!("Retain must never invoke the prefix hook, got: {prefix}");
+                #[allow(unreachable_code)]
+                Ok::<(), Error>(())
+            },
+        )
+        .await
+        .expect("retain cleanup must succeed");
+        assert_eq!(
+            order.lock().expect("order log unlocks").as_slice(),
+            ["children"],
+            "children deletion must run after the stamp step"
+        );
+    }
+
+    #[test]
+    fn delete_policy_on_an_indexer_still_never_plans_data_prefix_removal() {
+        use crate::finalizer::CleanupAction;
+
+        let plan = indexer_cleanup_plan(&DeletionPolicy::Delete, true, "demo-indexer");
+        assert!(
+            plan.iter()
+                .any(|action| matches!(action, CleanupAction::DeleteChildren)),
+            "Delete must still remove the indexer's own Deployment"
+        );
+        assert!(
+            plan.iter()
+                .all(|action| !matches!(action, CleanupAction::DeleteDataPrefix { .. })),
+            "an indexer owns no object-store data, so Delete must never plan prefix removal"
+        );
+        match plan.first() {
+            Some(CleanupAction::StampPrunedBy { reason }) => {
+                assert_eq!(reason, "Delete", "the stamp must name the Delete policy")
+            }
+            other => panic!("stamp must lead every plan, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_of_a_never_applied_indexer_returns_ok_without_touching_children_or_store() {
+        use crate::finalizer::execute_cleanup;
+
+        let plan = indexer_cleanup_plan(&DeletionPolicy::Retain, false, "demo-indexer");
+        assert_eq!(plan.len(), 1, "nothing applied means stamp only");
+        execute_cleanup(
+            &plan,
+            || async { Ok(()) },
+            || async {
+                panic!("no children exist; the child hook must never fire");
+                #[allow(unreachable_code)]
+                Ok::<(), Error>(())
+            },
+            |_: String| async {
+                panic!("no prefix step exists; the store hook must never fire");
+                #[allow(unreachable_code)]
+                Ok::<(), Error>(())
+            },
+        )
+        .await
+        .expect("never-applied cleanup must return Ok, never panic");
     }
 }
