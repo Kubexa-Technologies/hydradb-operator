@@ -134,13 +134,16 @@ spec:
                 apt-get update -qq
                 apt-get install -y -qq clang libclang-dev
                 # The image's pinned toolchain ships neither rustfmt nor clippy
-                # (rust-toolchain.toml asks for both, profile = minimal), so add
-                # them to that exact toolchain.
+                # (rust-toolchain.toml asks for both, profile = minimal); the mounted CA
+                # bundle makes the download work.
                 rustup component add rustfmt clippy
-                # The image's pinned toolchain ships neither rustfmt nor clippy;
-                # add them. The mounted CA bundle (SSL_CERT_FILE) makes the
-                # download from static.rust-lang.org work.
-                rustup component add rustfmt clippy
+                # rust2go's build script runs `go build` over the envtest crate's go/
+                # module, and that module declares `go 1.26.4`, so install the official
+                # tarball (never apt/snap).
+                curl -fsSL -o /tmp/go.tgz https://go.dev/dl/go1.26.4.linux-amd64.tar.gz
+                tar -C /usr/local -xzf /tmp/go.tgz
+                export PATH="/usr/local/go/bin:$PATH"
+                go version
                 cargo fmt --all --check
                 cargo clippy --workspace --all-targets -- -D warnings
                 cargo test --workspace
