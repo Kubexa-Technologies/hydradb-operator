@@ -1,4 +1,5 @@
-//! `GraphIndexer` reconciler: the indexer `Deployment` (todo 21).
+//! `GraphIndexer` reconciler: the indexer `Deployment` plus its
+//! `PodDisruptionBudget` (todo 22).
 //!
 //! Builds and applies the stateless indexer `Deployment` via [`apply_child`]
 //! (SSA with the pinned field manager). The pod runs the `graph-indexer`
@@ -26,9 +27,6 @@
 //! `pruned-by` and removes the `Deployment` under the owning cluster's
 //! `deletionPolicy` (`Retain` when the cluster reference is empty or
 //! unresolvable), and never plans a data-prefix step.
-//!
-//! TODO(todo-22): PDB/NetworkPolicy/
-//! ServiceMonitor. This module must NOT implement either.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -42,6 +40,7 @@ use k8s_openapi::api::core::v1::{
     EnvFromSource, EnvVar, HTTPGetAction, KeyToPath, PodSecurityContext, PodSpec, PodTemplateSpec,
     Probe, SeccompProfile, SecretVolumeSource, SecurityContext, Volume, VolumeMount,
 };
+use k8s_openapi::api::policy::v1::{PodDisruptionBudget, PodDisruptionBudgetSpec};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, OwnerReference};
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
@@ -52,7 +51,8 @@ use kube::runtime::controller::Action;
 
 use super::cluster::{DEFAULT_AUTH_KEY, SUCCESS_REQUEUE_SECS, policy_reason};
 use crate::apply::{
-    ROLE_AUTH, ROLE_CONFIG, apply_child, cluster_child_name, indexer_child_name, standard_labels,
+    ROLE_AUTH, ROLE_CONFIG, ROLE_PDB, apply_child, cluster_child_name, indexer_child_name,
+    standard_labels,
 };
 use crate::conditions::{live_conditions, new_condition, set_ready};
 use crate::context::Ctx;
@@ -453,6 +453,46 @@ pub fn desired_deployment(
     })
 }
 
+/// Build the desired indexer `PodDisruptionBudget` (pure: no API call).
+///
+/// One PDB per enabled indexer, `minAvailable: 1`, selecting exactly the
+/// indexer pods the Deployment manages. Owned by the indexer so removal
+/// cascades with it. A disabled indexer gets no PDB: with zero replicas the
+/// budget would be dead config.
+///
+/// # Errors
+///
+/// Returns [`Error::MissingField`] when the indexer has no name/uid yet, or
+/// [`Error::UnresolvableRef`] when `spec.clusterRef.name` is empty.
+pub fn desired_pdb(
+    indexer: &GraphIndexer,
+    cluster: &GraphCluster,
+) -> Result<PodDisruptionBudget, Error> {
+    let indexer_name = indexer.name_any();
+    let namespace = indexer.namespace().unwrap_or_default();
+    let cluster_name = cluster.name_any();
+    let _ = cluster_ref_name(indexer)?;
+
+    Ok(PodDisruptionBudget {
+        metadata: ObjectMeta {
+            name: Some(indexer_child_name(&indexer_name)),
+            namespace: Some(namespace),
+            labels: Some(standard_labels(&cluster_name, ROLE_PDB)),
+            owner_references: Some(vec![owner_ref_for_indexer(indexer)?]),
+            ..ObjectMeta::default()
+        },
+        spec: Some(PodDisruptionBudgetSpec {
+            min_available: Some(IntOrString::Int(1)),
+            selector: Some(LabelSelector {
+                match_labels: Some(standard_labels(&cluster_name, ROLE_INDEXER)),
+                ..LabelSelector::default()
+            }),
+            ..PodDisruptionBudgetSpec::default()
+        }),
+        ..PodDisruptionBudget::default()
+    })
+}
+
 /// Desired status for the disabled path: `Ready=False`/`Disabled` plus
 /// `Ready` replicas pinned at 0.
 fn disabled_status(generation: Option<i64>) -> GraphIndexerStatus {
@@ -581,6 +621,24 @@ async fn reconcile_inner(indexer: Arc<GraphIndexer>, ctx: Arc<Ctx>) -> Result<Ac
     let deployments = Api::<Deployment>::namespaced(ctx.client.clone(), &namespace);
     apply_child(&deployments, &desired).await?;
 
+    // One PDB per enabled indexer; a disabled indexer (zero replicas) owns
+    // no budget, and a stale one left from an earlier enabled generation is
+    // removed so it never lingers.
+    let pdbs = Api::<PodDisruptionBudget>::namespaced(ctx.client.clone(), &namespace);
+    let pdb_name = indexer_child_name(&name);
+    if indexer.spec.enabled {
+        apply_child(&pdbs, &desired_pdb(&indexer, &cluster)?).await?;
+    } else if pdbs
+        .get_opt(&pdb_name)
+        .await
+        .map_err(Error::from_kube_error)?
+        .is_some()
+    {
+        pdbs.delete(&pdb_name, &DeleteParams::default())
+            .await
+            .map_err(Error::from_kube_error)?;
+    }
+
     if !indexer.spec.enabled {
         write_status_if_changed(&indexers, &name, &disabled_status(generation)).await?;
         return Ok(Action::requeue(Duration::from_secs(SUCCESS_REQUEUE_SECS)));
@@ -700,21 +758,27 @@ fn indexer_cleanup_plan(
     crate::finalizer::cleanup_plan(policy, children_exist, false, indexer_name)
 }
 
-/// Delete the indexer-owned `Deployment`, tolerating 404s.
+/// Delete the indexer-owned children, tolerating 404s.
 ///
-/// The `Deployment` is the indexer's only direct child. A 404 surfaces as
-/// [`Error::Api`] and is treated as success by
-/// [`crate::finalizer::execute_cleanup`], so a never-applied indexer cleans
-/// up without touching anything else.
+/// The `Deployment` and the indexer `PodDisruptionBudget` are the indexer's
+/// only direct children. A 404 surfaces as [`Error::Api`] and is treated as
+/// success by [`crate::finalizer::execute_cleanup`], so a never-applied
+/// indexer cleans up without touching anything else.
 async fn delete_indexer_children(
     client: kube::Client,
     namespace: &str,
     indexer: &GraphIndexer,
 ) -> Result<(), Error> {
     let name = indexer.name_any();
-    let deployments = Api::<Deployment>::namespaced(client, namespace);
+    let params = DeleteParams::default();
+    let deployments = Api::<Deployment>::namespaced(client.clone(), namespace);
     let _ = deployments
-        .delete(&indexer_child_name(&name), &DeleteParams::default())
+        .delete(&indexer_child_name(&name), &params)
+        .await
+        .map_err(Error::from_kube_error)?;
+    let pdbs = Api::<PodDisruptionBudget>::namespaced(client, namespace);
+    let _ = pdbs
+        .delete(&indexer_child_name(&name), &params)
         .await
         .map_err(Error::from_kube_error)?;
     Ok(())
@@ -739,7 +803,12 @@ async fn cleanup_indexer(indexer: Arc<GraphIndexer>, ctx: Arc<Ctx>) -> Result<Ac
         .get_opt(&indexer_child_name(&name))
         .await
         .map_err(Error::from_kube_error)?
-        .is_some();
+        .is_some()
+        || Api::<PodDisruptionBudget>::namespaced(client.clone(), &namespace)
+            .get_opt(&indexer_child_name(&name))
+            .await
+            .map_err(Error::from_kube_error)?
+            .is_some();
     let plan = indexer_cleanup_plan(&policy, children_exist, &name);
     let indexers_api: Api<GraphIndexer> = Api::namespaced(client.clone(), &namespace);
     crate::finalizer::execute_cleanup(
@@ -1154,5 +1223,37 @@ mod tests {
         )
         .await
         .expect("never-applied cleanup must return Ok, never panic");
+    }
+
+    #[test]
+    fn indexer_pdb_pins_min_available_1_and_selects_the_indexer_pods() {
+        let indexer = indexer_fixture(true);
+        let cluster = cluster_fixture();
+        let pdb = desired_pdb(&indexer, &cluster).expect("indexer PDB builds without a cluster");
+        assert_eq!(
+            pdb.metadata.name.as_deref(),
+            Some("demo-indexer"),
+            "one PDB per indexer, named after the indexer"
+        );
+        let owner_refs = pdb
+            .metadata
+            .owner_references
+            .expect("PDB must carry an owner references");
+        assert_eq!(owner_refs.len(), 1, "exactly one owner references");
+        assert_eq!(owner_refs[0].kind, "GraphIndexer");
+        assert_eq!(owner_refs[0].controller, Some(true));
+        let spec = pdb.spec.expect("PDB must carry a spec");
+        assert_eq!(
+            spec.min_available,
+            Some(IntOrString::Int(1)),
+            "indexer PDB pins minAvailable: 1"
+        );
+        assert_eq!(
+            spec.selector
+                .expect("PDB must carry a selector")
+                .match_labels,
+            Some(standard_labels("demo", ROLE_INDEXER)),
+            "indexer PDB must select exactly the indexer pods"
+        );
     }
 }

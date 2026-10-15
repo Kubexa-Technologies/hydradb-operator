@@ -122,6 +122,26 @@ spec:
                 required:
                 - repository
                 type: object
+              monitoring:
+                default:
+                  serviceMonitor:
+                    enabled: false
+                description: Monitoring integration (ServiceMonitor opt-in, off by default).
+                properties:
+                  serviceMonitor:
+                    default:
+                      enabled: false
+                    description: Prometheus `ServiceMonitor` settings.
+                    properties:
+                      enabled:
+                        default: false
+                        description: |-
+                          Create a `ServiceMonitor` selecting the cluster metrics Services.
+                          Off by default: enabling it would force prometheus-operator CRDs
+                          to be installed (upstream parity).
+                        type: boolean
+                    type: object
+                type: object
               objectStore:
                 description: Backing object store (exactly one source; validated by todo 11).
                 properties:

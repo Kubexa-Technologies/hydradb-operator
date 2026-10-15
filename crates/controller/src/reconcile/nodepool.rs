@@ -1,4 +1,5 @@
-//! `GraphNodePool` reconciler: the node `StatefulSet` (todo 20).
+//! `GraphNodePool` reconciler: the node `StatefulSet` (todo 20) plus its
+//! `PodDisruptionBudget` (todo 22).
 //!
 //! Builds and applies the worker `StatefulSet` via [`apply_child`](crate::apply::apply_child)
 //! (SSA with the pinned field manager). The pod runs the `graph-node`
@@ -68,6 +69,7 @@ use k8s_openapi::api::core::v1::{
     ResourceRequirements, SeccompProfile, SecretVolumeSource, SecurityContext, Volume, VolumeMount,
     VolumeResourceRequirements,
 };
+use k8s_openapi::api::policy::v1::{PodDisruptionBudget, PodDisruptionBudgetSpec};
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, OwnerReference};
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
@@ -80,7 +82,8 @@ use super::cluster::{
     DEFAULT_AUTH_KEY, SUCCESS_REQUEUE_SECS, headless_service_name, node_pod_selector, policy_reason,
 };
 use crate::apply::{
-    ROLE_AUTH, ROLE_CONFIG, apply_child, cluster_child_name, pool_child_name, standard_labels,
+    ROLE_AUTH, ROLE_CONFIG, ROLE_PDB, apply_child, cluster_child_name, pool_child_name,
+    standard_labels,
 };
 use crate::conditions::{live_conditions, set_ready};
 use crate::context::Ctx;
@@ -554,6 +557,44 @@ pub fn desired_statefulset(
     })
 }
 
+/// Build the desired pool `PodDisruptionBudget` (pure: no API call).
+///
+/// One PDB per pool, `minAvailable: 1`, selecting the same node pods the
+/// cluster Services select. Owned by the pool so removal cascades with it.
+///
+/// # Errors
+///
+/// Returns [`Error::MissingField`] when the pool has no name/uid yet, or
+/// [`Error::UnresolvableRef`] when `spec.clusterRef.name` is empty.
+pub fn desired_pdb(
+    pool: &GraphNodePool,
+    cluster: &GraphCluster,
+) -> Result<PodDisruptionBudget, Error> {
+    let pool_name = pool.name_any();
+    let namespace = pool.namespace().unwrap_or_default();
+    let cluster_name = cluster.name_any();
+    let _ = cluster_ref_name(pool)?;
+
+    Ok(PodDisruptionBudget {
+        metadata: ObjectMeta {
+            name: Some(pool_child_name(&pool_name)),
+            namespace: Some(namespace),
+            labels: Some(standard_labels(&cluster_name, ROLE_PDB)),
+            owner_references: Some(vec![owner_ref_for_pool(pool)?]),
+            ..ObjectMeta::default()
+        },
+        spec: Some(PodDisruptionBudgetSpec {
+            min_available: Some(IntOrString::Int(1)),
+            selector: Some(LabelSelector {
+                match_labels: Some(node_pod_selector(&cluster_name)),
+                ..LabelSelector::default()
+            }),
+            ..PodDisruptionBudgetSpec::default()
+        }),
+        ..PodDisruptionBudget::default()
+    })
+}
+
 /// Desired status for the success path: kstatus `Ready` over the live set.
 ///
 /// TODO(todo-24): the full status writer owns `boltAddresses` and the
@@ -656,6 +697,9 @@ async fn reconcile_inner(pool: Arc<GraphNodePool>, ctx: Arc<Ctx>) -> Result<Acti
     let desired = desired_statefulset(&pool, &cluster)?;
     let statefulsets = Api::<StatefulSet>::namespaced(ctx.client.clone(), &namespace);
     apply_child(&statefulsets, &desired).await?;
+
+    let pdbs = Api::<PodDisruptionBudget>::namespaced(ctx.client.clone(), &namespace);
+    apply_child(&pdbs, &desired_pdb(&pool, &cluster)?).await?;
 
     let (ready_replicas, current_replicas) = statefulsets
         .get_opt(&pool_child_name(&name))
@@ -786,21 +830,28 @@ fn pool_cleanup_plan(
     crate::finalizer::cleanup_plan(policy, children_exist, false, pool_name)
 }
 
-/// Delete the pool-owned `StatefulSet`, tolerating 404s.
+/// Delete the pool-owned children, tolerating 404s.
 ///
-/// The `StatefulSet` is the pool's only direct child (PVCs cascade from it
-/// via garbage collection). A 404 surfaces as [`Error::Api`] and is treated
-/// as success by [`crate::finalizer::execute_cleanup`], so a never-applied
-/// pool cleans up without touching anything else.
+/// The `StatefulSet` and the pool `PodDisruptionBudget` are the pool's only
+/// direct children (PVCs cascade from the StatefulSet via garbage
+/// collection). A 404 surfaces as [`Error::Api`] and is treated as success
+/// by [`crate::finalizer::execute_cleanup`], so a never-applied pool cleans
+/// up without touching anything else.
 async fn delete_pool_children(
     client: kube::Client,
     namespace: &str,
     pool: &GraphNodePool,
 ) -> Result<(), Error> {
     let name = pool.name_any();
-    let statefulsets = Api::<StatefulSet>::namespaced(client, namespace);
+    let params = DeleteParams::default();
+    let statefulsets = Api::<StatefulSet>::namespaced(client.clone(), namespace);
     let _ = statefulsets
-        .delete(&pool_child_name(&name), &DeleteParams::default())
+        .delete(&pool_child_name(&name), &params)
+        .await
+        .map_err(Error::from_kube_error)?;
+    let pdbs = Api::<PodDisruptionBudget>::namespaced(client, namespace);
+    let _ = pdbs
+        .delete(&pool_child_name(&name), &params)
         .await
         .map_err(Error::from_kube_error)?;
     Ok(())
@@ -825,7 +876,12 @@ async fn cleanup_pool(pool: Arc<GraphNodePool>, ctx: Arc<Ctx>) -> Result<Action,
         .get_opt(&pool_child_name(&name))
         .await
         .map_err(Error::from_kube_error)?
-        .is_some();
+        .is_some()
+        || Api::<PodDisruptionBudget>::namespaced(client.clone(), &namespace)
+            .get_opt(&pool_child_name(&name))
+            .await
+            .map_err(Error::from_kube_error)?
+            .is_some();
     let plan = pool_cleanup_plan(&policy, children_exist, &name);
     let pools_api: Api<GraphNodePool> = Api::namespaced(client.clone(), &namespace);
     crate::finalizer::execute_cleanup(
@@ -1561,5 +1617,37 @@ mod tests {
         )
         .await
         .expect("never-applied cleanup must return Ok, never panic");
+    }
+
+    #[test]
+    fn pool_pdb_pins_min_available_1_and_selects_the_node_pods() {
+        let pool = pool_fixture();
+        let cluster = cluster_fixture();
+        let pdb = desired_pdb(&pool, &cluster).expect("pool PDB builds without a cluster");
+        assert_eq!(
+            pdb.metadata.name.as_deref(),
+            Some("demo-pool"),
+            "one PDB per pool, named after the pool"
+        );
+        let owner_refs = pdb
+            .metadata
+            .owner_references
+            .expect("PDB must carry an owner references");
+        assert_eq!(owner_refs.len(), 1, "exactly one owner references");
+        assert_eq!(owner_refs[0].kind, "GraphNodePool");
+        assert_eq!(owner_refs[0].controller, Some(true));
+        let spec = pdb.spec.expect("PDB must carry a spec");
+        assert_eq!(
+            spec.min_available,
+            Some(IntOrString::Int(1)),
+            "pool PDB pins minAvailable: 1"
+        );
+        assert_eq!(
+            spec.selector
+                .expect("PDB must carry a selector")
+                .match_labels,
+            Some(node_pod_selector("demo")),
+            "pool PDB must select the node pods"
+        );
     }
 }

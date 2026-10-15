@@ -191,6 +191,28 @@ impl Default for RuntimeSpec {
     }
 }
 
+/// Prometheus `ServiceMonitor` toggle for the cluster.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct ServiceMonitorSpec {
+    /// Create a `ServiceMonitor` selecting the cluster metrics Services.
+    /// Off by default: enabling it would force prometheus-operator CRDs
+    /// to be installed (upstream parity).
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+/// Monitoring integration for the cluster.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct MonitoringSpec {
+    /// Prometheus `ServiceMonitor` settings.
+    #[serde(default)]
+    pub service_monitor: ServiceMonitorSpec,
+}
+
 /// Advertised cluster endpoints observed by the controller.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -247,6 +269,9 @@ pub struct GraphClusterSpec {
     /// Operand runtime knobs.
     #[serde(default)]
     pub runtime: RuntimeSpec,
+    /// Monitoring integration (ServiceMonitor opt-in, off by default).
+    #[serde(default)]
+    pub monitoring: MonitoringSpec,
 }
 
 /// Observed state of a HydraDB cluster.

@@ -57,16 +57,21 @@ use hydradb_operator_api::spec::{PhaseLabel as _, S3};
 use hydradb_operator_api::validation::ValidationError;
 use k8s_openapi::ByteString;
 use k8s_openapi::api::core::v1::{ConfigMap, Pod, Secret, Service, ServicePort, ServiceSpec};
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use k8s_openapi::api::networking::v1::{
+    NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule, NetworkPolicyPeer,
+    NetworkPolicyPort, NetworkPolicySpec,
+};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta};
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::Resource as _;
 use kube::ResourceExt as _;
-use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams};
+use kube::api::{Api, ApiResource, DeleteParams, DynamicObject, ListParams, Patch, PatchParams};
+use kube::core::GroupVersionKind;
 use kube::runtime::controller::Action;
 
 use crate::apply::{
-    ROLE_AUTH, ROLE_BOLT, ROLE_CONFIG, ROLE_HTTPS, ROLE_METRICS, child_object_meta,
-    cluster_child_name, owner_ref_for, standard_labels,
+    ROLE_AUTH, ROLE_BOLT, ROLE_CONFIG, ROLE_HTTPS, ROLE_METRICS, ROLE_NETPOL, ROLE_SERVICEMONITOR,
+    child_object_meta, cluster_child_name, owner_ref_for, standard_labels,
 };
 use crate::conditions::{STALLED, live_conditions, new_condition, set_ready};
 use crate::context::Ctx;
@@ -461,6 +466,175 @@ pub fn desired_services(cluster: &GraphCluster) -> Result<Vec<Service>, Error> {
         desired_metrics_service(cluster)?,
         desired_indexer_metrics_service(cluster)?,
     ])
+}
+
+/// Labels selecting every pod of the cluster (node + indexer): the shared
+/// `name`/`instance` pair without a `component`, so the `NetworkPolicy`
+/// covers both roles with one rule set.
+#[must_use]
+pub fn cluster_pod_selector(cluster_name: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("app.kubernetes.io/name".to_owned(), "hydradb".to_owned()),
+        (
+            "app.kubernetes.io/instance".to_owned(),
+            cluster_name.to_owned(),
+        ),
+    ])
+}
+
+/// One TCP ingress/egress port for the `NetworkPolicy`.
+fn netpol_port(port: i32) -> NetworkPolicyPort {
+    NetworkPolicyPort {
+        port: Some(IntOrString::Int(port)),
+        protocol: Some("TCP".to_owned()),
+        ..NetworkPolicyPort::default()
+    }
+}
+
+/// Desired default-on `NetworkPolicy` (pure): ingress limited to the
+/// documented ports (Bolt 7687, HTTPS 8443, admin 9090/9091) from pods in
+/// the same namespace, plus egress for DNS and the object-store HTTPS
+/// path. There is no per-endpoint CIDR field on the CR, so object-store
+/// egress is the standard HTTPS ports rather than a pinned range.
+pub fn desired_network_policy(cluster: &GraphCluster) -> Result<NetworkPolicy, Error> {
+    let cluster_name = cluster.name_any();
+    let namespace_peer = NetworkPolicyPeer {
+        pod_selector: Some(LabelSelector::default()),
+        ..NetworkPolicyPeer::default()
+    };
+    let ingress = NetworkPolicyIngressRule {
+        from: Some(vec![namespace_peer]),
+        ports: Some(vec![
+            netpol_port(BOLT_PORT),
+            netpol_port(HTTPS_TARGET_PORT),
+            netpol_port(METRICS_PORT),
+            netpol_port(INDEXER_METRICS_PORT),
+        ]),
+    };
+    let dns_egress = NetworkPolicyEgressRule {
+        ports: Some(vec![
+            NetworkPolicyPort {
+                port: Some(IntOrString::Int(53)),
+                protocol: Some("UDP".to_owned()),
+                ..NetworkPolicyPort::default()
+            },
+            NetworkPolicyPort {
+                port: Some(IntOrString::Int(53)),
+                protocol: Some("TCP".to_owned()),
+                ..NetworkPolicyPort::default()
+            },
+        ]),
+        ..NetworkPolicyEgressRule::default()
+    };
+    let store_egress = NetworkPolicyEgressRule {
+        ports: Some(vec![netpol_port(80), netpol_port(443)]),
+        ..NetworkPolicyEgressRule::default()
+    };
+    Ok(NetworkPolicy {
+        metadata: child_object_meta(&cluster_name, ROLE_NETPOL, cluster)?,
+        spec: Some(NetworkPolicySpec {
+            pod_selector: Some(LabelSelector {
+                match_labels: Some(cluster_pod_selector(&cluster_name)),
+                ..LabelSelector::default()
+            }),
+            policy_types: Some(vec!["Ingress".to_owned(), "Egress".to_owned()]),
+            ingress: Some(vec![ingress]),
+            egress: Some(vec![dns_egress, store_egress]),
+        }),
+    })
+}
+
+/// Whether the cluster opts into the `ServiceMonitor` child: only
+/// `spec.monitoring.serviceMonitor.enabled == true`. Absent (default) means
+/// no `ServiceMonitor` exists at all.
+#[must_use]
+pub fn service_monitor_enabled(cluster: &GraphCluster) -> bool {
+    cluster.spec.monitoring.service_monitor.enabled
+}
+
+/// `ApiResource` for the `ServiceMonitor` child kind.
+///
+/// `monitoring.coreos.com` ships no `k8s-openapi` type, so the reconciler
+/// drives applies through a [`DynamicObject`]; the group/version/kind/plural
+/// pinned here match the `gen-rbac` marker exactly.
+#[must_use]
+pub fn service_monitor_api_resource() -> ApiResource {
+    ApiResource::from_gvk_with_plural(
+        &GroupVersionKind::gvk("monitoring.coreos.com", "v1", "ServiceMonitor"),
+        "servicemonitors",
+    )
+}
+
+/// Typed watch handle for the `ServiceMonitor` child kind.
+///
+/// `Controller::owns` needs `Resource<DynamicType = ()>`, which
+/// [`DynamicObject`] (typed by [`ApiResource`]) does not satisfy, so this
+/// minimal shape carries the same group/version/kind/plural for watches
+/// only. Unknown fields decode past it; the apply path stays on
+/// [`DynamicObject`].
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct ServiceMonitorObject {
+    metadata: ObjectMeta,
+    #[serde(default)]
+    spec: serde_json::Value,
+}
+
+impl kube::Resource for ServiceMonitorObject {
+    type DynamicType = ();
+    type Scope = kube::core::NamespaceResourceScope;
+
+    fn meta(&self) -> &ObjectMeta {
+        &self.metadata
+    }
+
+    fn meta_mut(&mut self) -> &mut ObjectMeta {
+        &mut self.metadata
+    }
+
+    fn group(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("monitoring.coreos.com")
+    }
+
+    fn version(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("v1")
+    }
+
+    fn kind(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("ServiceMonitor")
+    }
+
+    fn plural(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("servicemonitors")
+    }
+}
+
+/// Name of the cluster-owned `ServiceMonitor`: `<cluster>-servicemonitor`.
+#[must_use]
+pub fn service_monitor_name(cluster_name: &str) -> String {
+    cluster_child_name(cluster_name, ROLE_SERVICEMONITOR)
+}
+
+/// Desired opt-in `ServiceMonitor` (pure): scrapes `/metrics` on the `metrics`
+/// port of the node metrics Service every 30s. Callers must gate on
+/// [`service_monitor_enabled`]: building without the flag is a bug, not a
+/// default.
+pub fn desired_service_monitor(cluster: &GraphCluster) -> Result<DynamicObject, Error> {
+    debug_assert!(
+        service_monitor_enabled(cluster),
+        "ServiceMonitor must only be built when spec.monitoring.serviceMonitor.enabled is true"
+    );
+    let cluster_name = cluster.name_any();
+    let api_resource = service_monitor_api_resource();
+    let mut obj = DynamicObject::new(&service_monitor_name(&cluster_name), &api_resource);
+    obj.metadata.labels = Some(standard_labels(&cluster_name, ROLE_SERVICEMONITOR));
+    obj.metadata.owner_references = Some(vec![owner_ref_for(cluster)?]);
+    obj.data = serde_json::json!({
+        "spec": {
+            "selector": {"matchLabels": standard_labels(&cluster_name, ROLE_METRICS)},
+            "endpoints": [{"port": "metrics", "path": "/metrics", "interval": "30s"}],
+        }
+    });
+    Ok(obj)
 }
 
 /// Build the shared ConfigMap `data`: every operand env var.
@@ -896,6 +1070,32 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
         crate::apply::apply_child(&services_api, &desired_svc).await?;
     }
 
+    let netpol_api = Api::<NetworkPolicy>::namespaced(ctx.client.clone(), &namespace);
+    crate::apply::apply_child(&netpol_api, &desired_network_policy(&cluster)?).await?;
+
+    // The ServiceMonitor is opt-in only: absent unless the spec flag is set.
+    // A stale object (flag flipped back to false) is deleted so the
+    // "no ServiceMonitor by default" contract holds across updates too.
+    let sm_api: Api<DynamicObject> = Api::namespaced_with(
+        ctx.client.clone(),
+        &namespace,
+        &service_monitor_api_resource(),
+    );
+    let sm_name = service_monitor_name(&name);
+    if service_monitor_enabled(&cluster) {
+        crate::apply::apply_child(&sm_api, &desired_service_monitor(&cluster)?).await?;
+    } else if sm_api
+        .get_opt(&sm_name)
+        .await
+        .map_err(Error::from_kube_error)?
+        .is_some()
+    {
+        sm_api
+            .delete(&sm_name, &DeleteParams::default())
+            .await
+            .map_err(Error::from_kube_error)?;
+    }
+
     let secrets_api = Api::<Secret>::namespaced(ctx.client.clone(), &namespace);
     let existing_auth = secrets_api
         .get_opt(&crate::apply::cluster_child_name(&name, ROLE_AUTH))
@@ -1045,7 +1245,7 @@ async fn delete_cluster_children(
             .await
             .map_err(Error::from_kube_error)?;
     }
-    let services = Api::<Service>::namespaced(client, namespace);
+    let services = Api::<Service>::namespaced(client.clone(), namespace);
     for service in [
         headless_service_name(&name),
         indexer_metrics_service_name(&name),
@@ -1058,6 +1258,19 @@ async fn delete_cluster_children(
             .await
             .map_err(Error::from_kube_error)?;
     }
+    let netpols = Api::<NetworkPolicy>::namespaced(client.clone(), namespace);
+    let _ = netpols
+        .delete(&cluster_child_name(&name, ROLE_NETPOL), &params)
+        .await
+        .map_err(Error::from_kube_error)?;
+    // The ServiceMonitor may never have existed (opt-in): a 404 from this
+    // delete is success, handled by `execute_cleanup` like every other child.
+    let sm_api: Api<DynamicObject> =
+        Api::namespaced_with(client, namespace, &service_monitor_api_resource());
+    let _ = sm_api
+        .delete(&service_monitor_name(&name), &params)
+        .await
+        .map_err(Error::from_kube_error)?;
     Ok(())
 }
 
@@ -1089,9 +1302,28 @@ async fn cleanup_cluster(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
         .list(&list)
         .await
         .map_err(Error::from_kube_error)?;
+    let owned_netpols = Api::<NetworkPolicy>::namespaced(client.clone(), &namespace)
+        .list(&list)
+        .await
+        .map_err(Error::from_kube_error)?;
+    // The ServiceMonitor only exists when the spec flag is set; a missing
+    // CRD surfaces as 404, which `get_opt` maps to `None`.
+    let sm_api: Api<DynamicObject> =
+        Api::namespaced_with(client.clone(), &namespace, &service_monitor_api_resource());
+    let owned_sm = if service_monitor_enabled(&cluster) {
+        sm_api
+            .get_opt(&service_monitor_name(&name))
+            .await
+            .map_err(Error::from_kube_error)?
+            .is_some()
+    } else {
+        false
+    };
     let children_exist = !owned_configmaps.items.is_empty()
         || !owned_secrets.items.is_empty()
-        || !owned_services.items.is_empty();
+        || !owned_services.items.is_empty()
+        || !owned_netpols.items.is_empty()
+        || owned_sm;
     let store_reachable = store_is_reachable(&cluster, &ctx, &namespace).await?;
     let plan = crate::finalizer::cleanup_plan(&policy, children_exist, store_reachable, &name);
     let cr_api: Api<GraphCluster> = Api::namespaced(client.clone(), &namespace);
@@ -1731,5 +1963,97 @@ mod tests {
         )
         .await
         .expect("never-applied cleanup must return Ok, never panic");
+    }
+
+    #[test]
+    fn network_policy_covers_the_documented_ports_from_the_same_namespace() {
+        let cluster = cluster_fixture();
+        let policy =
+            desired_network_policy(&cluster).expect("network policy builds without a cluster");
+        assert_eq!(
+            policy.metadata.name.as_deref(),
+            Some("demo-netpol"),
+            "network policy name is deterministic"
+        );
+        let spec = policy.spec.expect("network policy must carry a spec");
+        assert_eq!(
+            spec.pod_selector.expect("policy selects pods").match_labels,
+            Some(cluster_pod_selector("demo")),
+            "policy must cover every pod of the cluster"
+        );
+        assert_eq!(
+            spec.policy_types,
+            Some(vec!["Ingress".to_owned(), "Egress".to_owned()]),
+            "policy must restrict both directions"
+        );
+        let ingress = spec.ingress.expect("policy must carry an ingress rule");
+        assert_eq!(ingress.len(), 1, "exactly one ingress rule");
+        let mut ports: Vec<i32> = ingress[0]
+            .ports
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|port| match port.port {
+                Some(IntOrString::Int(value)) => value,
+                other => panic!("ingress port must be numeric, got: {other:?}"),
+            })
+            .collect();
+        ports.sort_unstable();
+        assert_eq!(
+            ports,
+            vec![7687, 8443, 9090, 9091],
+            "ingress must open exactly Bolt/HTTPS/admin/indexer-admin"
+        );
+        let from = ingress[0].from.clone().unwrap_or_default();
+        assert_eq!(from.len(), 1, "exactly one ingress source");
+        assert!(
+            from[0].pod_selector.is_some() && from[0].ip_block.is_none(),
+            "ingress source must be same-namespace pods, got: {from:?}"
+        );
+        let egress = spec.egress.expect("policy must carry egress rules");
+        assert_eq!(egress.len(), 2, "DNS plus object-store egress");
+    }
+
+    #[test]
+    fn service_monitor_is_absent_by_default_and_builds_when_enabled() {
+        let cluster = cluster_fixture();
+        assert!(
+            !service_monitor_enabled(&cluster),
+            "a default cluster must not enable the ServiceMonitor"
+        );
+        let mut enabled = cluster;
+        enabled.spec.monitoring.service_monitor.enabled = true;
+        assert!(
+            service_monitor_enabled(&enabled),
+            "the spec flag must opt into the ServiceMonitor"
+        );
+        let obj =
+            desired_service_monitor(&enabled).expect("service monitor builds without a cluster");
+        assert_eq!(
+            obj.metadata.name.as_deref(),
+            Some("demo-servicemonitor"),
+            "service monitor name is deterministic"
+        );
+        let spec = obj
+            .data
+            .get("spec")
+            .expect("service monitor must carry a spec");
+        let match_labels = spec
+            .get("selector")
+            .and_then(|selector| selector.get("matchLabels"))
+            .expect("service monitor must carry a selector");
+        assert_eq!(
+            match_labels.get("app.kubernetes.io/component"),
+            Some(&serde_json::Value::String("metrics".to_owned())),
+            "monitor must select the node metrics Service, got: {spec}"
+        );
+        let endpoints = spec
+            .get("endpoints")
+            .expect("service monitor must carry endpoints");
+        assert_eq!(
+            endpoints,
+            &serde_json::json!([{"port": "metrics", "path": "/metrics", "interval": "30s"}]),
+            "monitor must scrape /metrics on the metrics port, got: {endpoints}"
+        );
     }
 }

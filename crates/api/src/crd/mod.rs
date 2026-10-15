@@ -9,7 +9,7 @@ pub mod nodepool;
 
 pub use cluster::{
     AuthSpec, DeletionPolicy, Endpoints, GraphCluster, GraphClusterSpec, GraphClusterStatus,
-    GraphIdentity, RuntimeSpec, ServiceSpec, TlsSpec,
+    GraphIdentity, MonitoringSpec, RuntimeSpec, ServiceMonitorSpec, ServiceSpec, TlsSpec,
 };
 pub use indexer::{GraphIndexer, GraphIndexerSpec, GraphIndexerStatus};
 pub use nodepool::{

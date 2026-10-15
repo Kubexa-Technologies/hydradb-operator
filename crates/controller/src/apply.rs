@@ -39,6 +39,9 @@ pub const ROLE_HEADLESS: &str = "headless";
 pub const ROLE_PDB: &str = "pdb";
 /// Child role for the `NetworkPolicy`.
 pub const ROLE_NETPOL: &str = "netpol";
+/// Child role for the `ServiceMonitor` (opt-in via
+/// `spec.monitoring.serviceMonitor.enabled`).
+pub const ROLE_SERVICEMONITOR: &str = "servicemonitor";
 
 /// SSA patch parameters shared by every child write: the pinned field
 /// manager with conflict forcing, so the controller owns every field it
@@ -212,7 +215,15 @@ mod tests {
     #[test]
     fn child_names_are_deterministic_and_prefixed_with_the_cluster_name() {
         for role in [
-            "config", "auth", "bolt", "https", "metrics", "headless", "pdb", "netpol",
+            "config",
+            "auth",
+            "bolt",
+            "https",
+            "metrics",
+            "headless",
+            "pdb",
+            "netpol",
+            "servicemonitor",
         ] {
             let first = cluster_child_name("demo", role);
             let second = cluster_child_name("demo", role);

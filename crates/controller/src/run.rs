@@ -68,10 +68,12 @@ pub async fn run() -> Result<(), Error> {
 fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
     use futures::StreamExt as _;
     use k8s_openapi::api::core::v1::{ConfigMap, Secret};
+    use k8s_openapi::api::networking::v1::NetworkPolicy;
     use kube::Api;
     use kube::runtime::Controller;
 
     use crate::apply::CLUSTER_SELECTOR_LABEL;
+    use crate::reconcile::cluster::ServiceMonitorObject;
 
     let client = ctx.client.clone();
     let clusters = ctx.clusters.clone();
@@ -88,6 +90,14 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
             )
             .owns(
                 Api::<Secret>::all(client.clone()),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                Api::<NetworkPolicy>::all(client.clone()),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                Api::<ServiceMonitorObject>::all(client.clone()),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .with_config(watcher::controller_config())
@@ -115,6 +125,7 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
 fn spawn_graph_nodepool_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
     use futures::StreamExt as _;
     use k8s_openapi::api::apps::v1::StatefulSet;
+    use k8s_openapi::api::policy::v1::PodDisruptionBudget;
     use kube::Api;
     use kube::runtime::Controller;
 
@@ -131,6 +142,10 @@ fn spawn_graph_nodepool_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
         let running = Controller::new(pools, watcher::watcher_config(&support))
             .owns(
                 Api::<StatefulSet>::all(client.clone()),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                Api::<PodDisruptionBudget>::all(client.clone()),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .with_config(watcher::controller_config())
@@ -158,6 +173,7 @@ fn spawn_graph_nodepool_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
 fn spawn_graph_indexer_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
     use futures::StreamExt as _;
     use k8s_openapi::api::apps::v1::Deployment;
+    use k8s_openapi::api::policy::v1::PodDisruptionBudget;
     use kube::Api;
     use kube::runtime::Controller;
 
@@ -174,6 +190,10 @@ fn spawn_graph_indexer_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
         let running = Controller::new(indexers, watcher::watcher_config(&support))
             .owns(
                 Api::<Deployment>::all(client.clone()),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                Api::<PodDisruptionBudget>::all(client.clone()),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .with_config(watcher::controller_config())

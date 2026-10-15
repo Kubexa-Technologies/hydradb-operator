@@ -26,6 +26,9 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | spec.image.pullSecrets[].name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
 | spec.image.repository | string | required |  | Image repository (registry + path), e.g. `example.com/org/hydradb`. |
 | spec.image.tag | string | optional |  | Image tag. Mutually combinable with `digest`; never `:latest`. |
+| spec.monitoring | object | optional | {"serviceMonitor":{"enabled":false}} | Monitoring integration (ServiceMonitor opt-in, off by default). |
+| spec.monitoring.serviceMonitor | object | optional | {"enabled":false} | Prometheus `ServiceMonitor` settings. |
+| spec.monitoring.serviceMonitor.enabled | boolean | optional | false | Create a `ServiceMonitor` selecting the cluster metrics Services.<br/>Off by default: enabling it would force prometheus-operator CRDs<br/>to be installed (upstream parity). |
 | spec.objectStore | object | required |  | Backing object store (exactly one source; validated by todo 11). |
 | spec.objectStore.explicit | object | optional |  | Inline S3-compatible configuration. |
 | spec.objectStore.explicit.allowHttp | boolean | optional | false | Allow plain-HTTP endpoints (non-TLS, testing only). |

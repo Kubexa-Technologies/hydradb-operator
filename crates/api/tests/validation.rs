@@ -7,7 +7,7 @@
 
 use hydradb_operator_api::crd::{
     AuthSpec, DeletionPolicy, GraphCluster, GraphClusterSpec, GraphIdentity, GraphIndexer,
-    GraphNodePool, RuntimeSpec, ServiceSpec, TlsSpec,
+    GraphNodePool, MonitoringSpec, RuntimeSpec, ServiceSpec, TlsSpec,
 };
 use hydradb_operator_api::spec::{Image, ObjectStore, S3};
 use kube::CustomResourceExt;
@@ -46,6 +46,7 @@ fn valid_spec() -> GraphClusterSpec {
         deletion_policy: DeletionPolicy::Retain,
         service: ServiceSpec::default(),
         runtime: RuntimeSpec::default(),
+        monitoring: MonitoringSpec::default(),
     }
 }
 
