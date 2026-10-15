@@ -29,14 +29,14 @@
 #   - Runs as non-root 65532:65532 (the :nonroot base default, set explicitly).
 
 # --- planner: compute the cargo-chef dependency recipe -----------------------
-FROM rust:1.92 AS planner
+FROM rust:1.92@sha256:f58923369ba295ae1f60bc49d03f2c955a5c93a0b7d49acfb2b2a65bebaf350d AS planner
 WORKDIR /src
 RUN cargo install cargo-chef --locked --version 0.1.78
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # --- chef: pre-build the dependency skeleton for a warm layer cache ---------
-FROM rust:1.92 AS chef
+FROM rust:1.92@sha256:f58923369ba295ae1f60bc49d03f2c955a5c93a0b7d49acfb2b2a65bebaf350d AS chef
 WORKDIR /src
 RUN cargo install cargo-chef --locked --version 0.1.78
 COPY --from=planner /src/recipe.json recipe.json
@@ -66,7 +66,7 @@ COPY --from=builder /out/hydradb-operator /hydradb-operator
 COPY --from=builder /out/hydradb /hydradb
 
 # --- runtime: distroless, non-root, operator entrypoint ------------------------
-FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2 AS runtime
 # Explicit paths: a `bin` context missing either file is a hard build error.
 COPY --from=bin /hydradb-operator /usr/local/bin/hydradb-operator
 COPY --from=bin /hydradb /usr/local/bin/hydradb
