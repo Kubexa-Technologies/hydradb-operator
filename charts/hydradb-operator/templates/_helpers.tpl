@@ -1,3 +1,4 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{/* hydradb-operator helpers. */}}
 {{/* fullname: release-scoped resource name, DNS-1123 safe. */}}
 {{- define "hydradb-operator.fullname" -}}

@@ -25,9 +25,14 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// SPDX header required on every generated CRD; written here because a
+/// hand-edit of the checked-in YAML is reverted by the next `gen-all`.
+const SPDX_HEADER: &str = "# SPDX-License-Identifier: Apache-2.0\n";
+
 /// Serialize one CRD with a stable field order and exactly one trailing newline.
 fn render_crd(crd: &CustomResourceDefinition) -> anyhow::Result<String> {
-    let mut yaml = serde_saphyr::to_string(crd)?;
+    let mut yaml = String::from(SPDX_HEADER);
+    yaml.push_str(&serde_saphyr::to_string(crd)?);
     if !yaml.ends_with('\n') {
         yaml.push('\n');
     }

@@ -1,3 +1,4 @@
+{{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{/* RBAC sourced from `cargo xtask gen-rbac` output (deploy/rbac/operator-clusterrole.yaml). */}}
 {{/* installScope=namespaced renders Role/RoleBinding; installScope=cluster renders ClusterRole/ClusterRoleBinding. */}}
 apiVersion: rbac.authorization.k8s.io/v1

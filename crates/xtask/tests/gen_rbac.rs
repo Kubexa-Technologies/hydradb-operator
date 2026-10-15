@@ -203,8 +203,13 @@ fn gen_rbac_files_carry_the_generated_header() {
     for path in yaml_files(&rbac_dir()) {
         let text = read_raw(&path);
         assert!(
-            text.starts_with("# GENERATED"),
-            "{} must start with the generated-file header",
+            text.starts_with("# SPDX-License-Identifier: Apache-2.0\n"),
+            "{} must start with the SPDX license header",
+            path.display()
+        );
+        assert!(
+            text.contains("# GENERATED"),
+            "{} must carry the generated-header",
             path.display()
         );
         assert!(
