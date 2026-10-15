@@ -2,8 +2,8 @@
 //!
 //! Todo 27 wires every subcommand and fully implements `version`. Todo 28
 //! implements the read commands (`status`, `endpoints`, `logs`) as file
-//! modules; `doctor` (todo 29) and `scale` (todo 30) stay honest
-//! [`crate::CliError::NotImplemented`] stubs. They never succeed silently
+//! modules, todo 29 implements `doctor`; `scale` (todo 30) stays an honest
+//! [`crate::CliError::NotImplemented`] stub. Stubs never succeed silently
 //! and never hit the network.
 
 use crate::{Cli, CliError};
@@ -20,25 +20,7 @@ pub mod endpoints;
 pub mod logs;
 
 /// `hydradb doctor` — run the documented readiness checklist (todo 29).
-pub mod doctor {
-    use super::*;
-
-    /// Arguments for `hydradb doctor`.
-    #[derive(Debug, Clone, Default, clap::Args)]
-    pub struct DoctorArgs {}
-
-    /// Run `hydradb doctor` (todo 29 owns the body).
-    ///
-    /// # Errors
-    ///
-    /// Always returns [`CliError::NotImplemented`] until todo 29 lands.
-    pub async fn run(_cli: &Cli, _args: &DoctorArgs) -> Result<(), CliError> {
-        Err(CliError::NotImplemented {
-            command: "doctor",
-            owning_todo: 29,
-        })
-    }
-}
+pub mod doctor;
 
 /// `hydradb scale` — patch a `GraphNodePool`/`GraphIndexer` replica count
 /// (todo 30).
