@@ -1,0 +1,51 @@
+{{ template "chart.header" . }}
+{{ template "chart.description" . }}
+
+The operator reconciles three CRDs in group `hydradb.helmforge.dev/v1alpha1`:
+`GraphCluster` (deployment lifecycle), `GraphNodePool` (worker scaling),
+`GraphIndexer` (indexing jobs). The controller builds every child object in
+Rust — it never shells out to `helm template` at runtime.
+
+## Install
+
+```sh
+helm install hydradb-operator oci://harbor.kubexa.tech/oss/hydradb-operator \
+  --version <version> --namespace hydradb-system --create-namespace
+```
+
+## Watch scope
+
+`installScope: namespaced` (default) watches `OPERATOR_NAMESPACE` only and
+renders `Role`/`RoleBinding`. `installScope: cluster` watches all namespaces
+and renders `ClusterRole`/`ClusterRoleBinding`. See `docs/install-scope.md`.
+
+## Monitoring
+
+A Prometheus `ServiceMonitor` is rendered only when
+`monitoring.serviceMonitor.enabled: true` (default `false`).
+See `docs/monitoring.md`.
+
+## Examples
+
+- `examples/values-development.yaml` — minimal local install.
+- `examples/values-production.yaml` — HA install with monitoring and guards.
+
+## Testing
+
+```sh
+helm unittest charts/hydradb-operator
+helm template release charts/hydradb-operator -f charts/hydradb-operator/ci/default-values.yaml
+```
+
+Suites live in `tests/` (one file per template, `documentSelector` keyed,
+both enabled and disabled states asserted for every optional resource).
+
+## Security scan
+
+No image is published with the `:latest` tag; the Deployment test asserts a
+`v<semver>` tag. Chart signing and SBOM are tracked separately
+(see `docs/signing.md` in a later change).
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}

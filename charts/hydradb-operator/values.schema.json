@@ -110,6 +110,22 @@
         "level": { "type": "string", "minLength": 1 }
       },
       "required": ["level"]
+    },
+    "pdb": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["enabled"]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" }
+      },
+      "required": ["enabled"]
     }
   },
   "required": [
@@ -122,6 +138,8 @@
     "installScope",
     "monitoring",
     "crds",
-    "log"
+    "log",
+    "pdb",
+    "networkPolicy"
   ]
 }

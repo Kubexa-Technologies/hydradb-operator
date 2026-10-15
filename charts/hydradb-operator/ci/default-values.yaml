@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# CI default: stock chart defaults (namespaced scope, no ServiceMonitor).
+# Exercises the safest install path.
+replicaCount: 1
+installScope: namespaced
+monitoring:
+  serviceMonitor:
+    enabled: false

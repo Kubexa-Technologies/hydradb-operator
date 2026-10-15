@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+# Production example: HA operator with monitoring and guards on.
+# Pin image.digest to the published digest for supply-chain safety.
+image:
+  repository: harbor.kubexa.tech/oss/hydradb-operator
+  tag: v0.1.0
+  digest: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+replicaCount: 2
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+nodeSelector: {}
+tolerations: []
+affinity: {}
+installScope: cluster
+monitoring:
+  serviceMonitor:
+    enabled: true
+crds:
+  install: true
+log:
+  level: info
+pdb:
+  enabled: true
+networkPolicy:
+  enabled: true

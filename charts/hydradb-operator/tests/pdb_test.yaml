@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+suite: PodDisruptionBudget guard
+templates:
+  - pdb.yaml
+tests:
+  - it: renders a PodDisruptionBudget with minAvailable 1 by default
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: PodDisruptionBudget
+        documentSelector:
+          path: kind
+          value: PodDisruptionBudget
+      - equal:
+          path: spec.minAvailable
+          value: 1
+        documentSelector:
+          path: kind
+          value: PodDisruptionBudget
+
+  - it: renders no PodDisruptionBudget when disabled
+    set:
+      pdb:
+        enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

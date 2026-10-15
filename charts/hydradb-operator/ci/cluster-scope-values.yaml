@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# CI cluster scope: operator watches all namespaces.
+# Renders ClusterRole/ClusterRoleBinding and OPERATOR_SCOPE=cluster.
+installScope: cluster
+replicaCount: 1

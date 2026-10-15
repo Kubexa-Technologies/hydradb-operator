@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: Apache-2.0
+suite: RBAC scope handling
+templates:
+  - rbac.yaml
+tests:
+  - it: renders a namespaced Role and RoleBinding by default
+    asserts:
+      - equal:
+          path: kind
+          value: Role
+        documentSelector:
+          path: kind
+          value: Role
+      - equal:
+          path: kind
+          value: RoleBinding
+        documentSelector:
+          path: kind
+          value: RoleBinding
+      - hasDocuments:
+          count: 2
+
+  - it: renders ClusterRole and ClusterRoleBinding for installScope cluster
+    set:
+      installScope: cluster
+    asserts:
+      - equal:
+          path: kind
+          value: ClusterRole
+        documentSelector:
+          path: kind
+          value: ClusterRole
+      - equal:
+          path: kind
+          value: ClusterRoleBinding
+        documentSelector:
+          path: kind
+          value: ClusterRoleBinding
+      - hasDocuments:
+          count: 2
+
+  - it: scopes the RoleBinding subject to the release namespace
+    set:
+      installScope: namespaced
+    asserts:
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+        documentSelector:
+          path: kind
+          value: RoleBinding
+
+  - it: grants the HydraDB CRDs plus owned children
+    set:
+      installScope: cluster
+    asserts:
+      - equal:
+          path: rules[0]
+          value:
+            apiGroups:
+              - hydradb.helmforge.dev
+            resources:
+              - graphclusters
+              - graphnodepools
+              - graphindexers
+            verbs:
+              - get
+              - list
+              - watch
+              - update
+              - patch
+        documentSelector:
+          path: kind
+          value: ClusterRole

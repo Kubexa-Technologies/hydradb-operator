@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+suite: operator Deployment
+templates:
+  - deployment.yaml
+tests:
+  - it: renders the pinned operator image (never latest)
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: harbor.kubexa.tech/oss/hydradb-operator:v0.1.0
+        documentSelector:
+          path: kind
+          value: Deployment
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ":v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        documentSelector:
+          path: kind
+          value: Deployment
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ":latest"
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: defaults to a single replica
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: honours a custom replica count
+    set:
+      replicaCount: 3
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: pins a digest when image.digest is set
+    set:
+      image:
+        digest: abc123
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: harbor.kubexa.tech/oss/hydradb-operator:v0.1.0@sha256:abc123
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: propagates installScope namespaced to OPERATOR_SCOPE
+    set:
+      installScope: namespaced
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[1].value
+          value: namespaced
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: propagates installScope cluster to OPERATOR_SCOPE
+    set:
+      installScope: cluster
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[1].value
+          value: cluster
+        documentSelector:
+          path: kind
+          value: Deployment
+
+  - it: runs as a non-root distroless-compatible pod
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+        documentSelector:
+          path: kind
+          value: Deployment
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+        documentSelector:
+          path: kind
+          value: Deployment

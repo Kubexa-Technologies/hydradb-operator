@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# CI monitoring: opt-in ServiceMonitor for the operator metrics endpoint.
+monitoring:
+  serviceMonitor:
+    enabled: true

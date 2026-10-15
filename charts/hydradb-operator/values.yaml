@@ -49,3 +49,11 @@ crds:
 log:
   # -- Tracing/logging filter directive (RUST_LOG format).
   level: info
+# -- PodDisruptionBudget settings for the operator Deployment.
+pdb:
+  # -- Enable creation of a PodDisruptionBudget (minAvailable: 1).
+  enabled: true
+# -- NetworkPolicy settings for the operator pods.
+networkPolicy:
+  # -- Enable creation of a NetworkPolicy (healthz ingress, DNS/apiserver egress).
+  enabled: true

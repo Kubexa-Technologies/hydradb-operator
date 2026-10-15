@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+suite: ServiceMonitor opt-in
+templates:
+  - servicemonitor.yaml
+tests:
+  - it: renders no ServiceMonitor by default
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a ServiceMonitor scraping the metrics endpoint when enabled
+    set:
+      monitoring:
+        serviceMonitor:
+          enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: kind
+          value: ServiceMonitor
+        documentSelector:
+          path: kind
+          value: ServiceMonitor
+      - equal:
+          path: spec.endpoints[0].path
+          value: /metrics
+        documentSelector:
+          path: kind
+          value: ServiceMonitor
