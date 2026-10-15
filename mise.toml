@@ -1,17 +1,39 @@
 [tasks.fmt]
+description = "Check formatting across the workspace"
 run = "cargo fmt --all --check"
 
 [tasks.lint]
+description = "Lint every crate and target with warnings denied"
 run = "cargo clippy --workspace --all-targets -- -D warnings"
 
 [tasks.test]
+description = "Run the workspace unit and integration tests"
 run = "cargo test --workspace"
 
 [tasks.build]
+description = "Build every crate in release mode"
 run = "cargo build --workspace --release"
 
 [tasks.check-drift]
+description = "Fail if any generated artifact is stale"
 run = "cargo xtask check-drift"
 
 [tasks.e2e]
+description = "Run the kind-based end-to-end suite (requires a cluster)"
 run = "cargo run -p hydradb-operator-e2e"
+
+[tasks.test-e2e]
+description = "Alias for e2e (requires a cluster)"
+run = "cargo run -p hydradb-operator-e2e"
+
+[tasks.docker-build]
+description = "Build the operator image tagged from .version"
+run = "docker build -t hydradb-operator:$(cat .version) ."
+
+[tasks.docs]
+description = "Regenerate the chart README with helm-docs"
+run = "helm-docs --chart-search-root charts"
+
+[tasks.verify]
+description = "Run the full local verification gate (no cluster required)"
+run = "bash scripts/verify.sh"
