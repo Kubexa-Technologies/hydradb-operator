@@ -1356,6 +1356,11 @@ spec:
                 description: Label of the currently served index generation.
                 nullable: true
                 type: string
+              currentReplicas:
+                default: 0
+                description: Current indexer replicas (observed on the Deployment).
+                format: int32
+                type: integer
               observedGeneration:
                 description: Last reconciled generation.
                 format: int64

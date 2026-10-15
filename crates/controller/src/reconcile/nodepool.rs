@@ -47,10 +47,12 @@
 //! (`Retain` when the cluster reference is empty or unresolvable), and never
 //! plans a data-prefix step.
 //!
-//! TODO(todo-24): the full `GraphNodePoolStatus` writer (`boltAddresses`,
-//! endpoints). This module writes only the `Ready` conditions plus the
-//! replica counts, mirroring `reconcile::indexer`; live `boltAddresses` are
-//! preserved verbatim, never recomputed here.
+//! Status (todo 24): the full `GraphNodePoolStatus` writer lives here:
+//! `conditions` plus `observedGeneration`, `readyReplicas`/`currentReplicas`
+//! from the owned `StatefulSet` and `boltAddresses` recomputed from the LIVE
+//! node-pod list (one `Api::list` scoped by the cluster label, never N gets).
+//! A partially ready pool reports `Ready=False` while `observedGeneration`
+//! still tracks `metadata.generation`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -75,7 +77,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, 
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::Resource as _;
 use kube::ResourceExt as _;
-use kube::api::{Api, DeleteParams, Patch, PatchParams};
+use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams};
 use kube::runtime::controller::Action;
 
 use super::cluster::{
@@ -85,7 +87,7 @@ use crate::apply::{
     ROLE_AUTH, ROLE_CONFIG, ROLE_PDB, apply_child, cluster_child_name, pool_child_name,
     standard_labels,
 };
-use crate::conditions::{live_conditions, set_ready};
+use crate::conditions::set_ready;
 use crate::context::Ctx;
 use crate::error::{Error, ErrorClass};
 use crate::metrics;
@@ -595,20 +597,28 @@ pub fn desired_pdb(
     })
 }
 
-/// Desired status for the success path: kstatus `Ready` over the live set.
+/// Desired status for the success path: kstatus `Ready` over the live set,
+/// plus `readyReplicas`/`currentReplicas` and the recomputed `boltAddresses`.
 ///
-/// TODO(todo-24): the full status writer owns `boltAddresses` and the
-/// endpoint surface; the addresses below are the preserved live value, never
-/// recomputed here.
+/// `Ready` is `True` only when every desired replica reports ready; a
+/// partially ready pool is `Ready=False` (still converging) while
+/// `observed_generation` keeps tracking the reconciled generation.
+/// `observed_generation` is the reconciler-observed `metadata.generation`,
+/// never advanced optimistically.
 fn ready_status(
     live_conditions_set: &[k8s_openapi::apimachinery::pkg::apis::meta::v1::Condition],
     generation: Option<i64>,
     ready_replicas: i32,
     current_replicas: i32,
+    desired_replicas: i32,
     bolt_addresses: Vec<String>,
 ) -> GraphNodePoolStatus {
     let mut conditions = live_conditions_set.to_vec();
-    set_ready(&mut conditions, true, generation);
+    set_ready(
+        &mut conditions,
+        crate::status::is_fully_ready(ready_replicas, desired_replicas),
+        generation,
+    );
     GraphNodePoolStatus {
         conditions,
         observed_generation: generation,
@@ -620,9 +630,10 @@ fn ready_status(
 
 /// Patch the `/status` subresource when the desired status differs from live.
 ///
-/// The comparison is field-exact, so an unchanged status produces NO write
-/// and never hot-loops (todo 24 owns the full status writer; this covers only
-/// the fields todo 20 sets).
+/// The comparison is field-exact over the full surface (`conditions`,
+/// `observedGeneration`, `readyReplicas`, `currentReplicas`,
+/// `boltAddresses`), so an unchanged status produces NO write and never
+/// hot-loops. The patch touches `/status` only, never `spec`.
 ///
 /// # Errors
 ///
@@ -640,16 +651,7 @@ async fn write_status_if_changed(
         current_replicas: 0,
         bolt_addresses: Vec::new(),
     });
-    let conditions_changed = !matches!(
-        live_conditions(&live_status.conditions, &desired.conditions),
-        crate::conditions::StatusUpdate::NoChange
-    );
-    if !conditions_changed
-        && live_status.observed_generation == desired.observed_generation
-        && live_status.ready_replicas == desired.ready_replicas
-        && live_status.current_replicas == desired.current_replicas
-        && live_status.bolt_addresses == desired.bolt_addresses
-    {
+    if !crate::status::pool_status_needs_write(&live_status, desired) {
         return Ok(());
     }
     api.patch_status(
@@ -660,6 +662,7 @@ async fn write_status_if_changed(
             "observedGeneration": desired.observed_generation,
             "readyReplicas": desired.ready_replicas,
             "currentReplicas": desired.current_replicas,
+            "boltAddresses": desired.bolt_addresses,
         })),
     )
     .await
@@ -713,15 +716,26 @@ async fn reconcile_inner(pool: Arc<GraphNodePool>, ctx: Arc<Ctx>) -> Result<Acti
             )
         })
         .unwrap_or_default();
+    // The pool's SINGLE child-state list: one `Api::list` of node pods scoped
+    // by the cluster label, never N per-pod gets. The same membership feeds
+    // `status.boltAddresses`.
+    let pods_api =
+        Api::<k8s_openapi::api::core::v1::Pod>::namespaced(ctx.client.clone(), &namespace);
+    let live_pod_names: Vec<String> = pods_api
+        .list(&ListParams::default().labels(&crate::status::node_pod_selector(&cluster_ref)))
+        .await
+        .map_err(Error::from_kube_error)?
+        .items
+        .iter()
+        .filter_map(|pod| pod.metadata.name.clone())
+        .collect();
+    let bolt_addresses =
+        crate::status::sorted_bolt_addresses(&live_pod_names, &cluster_ref, &namespace);
     let live = pools.get(&name).await.map_err(Error::from_kube_error)?;
-    let live_status = live.status.as_ref();
-    let live_conditions_set = live_status
+    let live_conditions_set = live
+        .status
+        .as_ref()
         .map(|status| status.conditions.clone())
-        .unwrap_or_default();
-    // TODO(todo-24): `boltAddresses` are populated by the status writer; the
-    // live value is preserved here so this write never clobbers it.
-    let bolt_addresses = live_status
-        .map(|status| status.bolt_addresses.clone())
         .unwrap_or_default();
     write_status_if_changed(
         &pools,
@@ -731,6 +745,7 @@ async fn reconcile_inner(pool: Arc<GraphNodePool>, ctx: Arc<Ctx>) -> Result<Acti
             generation,
             ready_replicas,
             current_replicas,
+            pool.spec.replicas,
             bolt_addresses,
         ),
     )
@@ -1377,6 +1392,53 @@ mod tests {
         let error = desired_statefulset(&pool, &cluster)
             .expect_err("empty clusterRef must fail the builder");
         assert_eq!(error.class(), ErrorClass::Structural);
+    }
+
+    #[test]
+    fn fully_ready_pool_reports_ready_true_with_generation_tracked() {
+        let pool = pool_fixture();
+        let generation = pool.meta().generation;
+        let status = ready_status(
+            &[],
+            generation,
+            3,
+            3,
+            pool.spec.replicas,
+            vec!["pod-a".to_owned()],
+        );
+        let ready = status
+            .conditions
+            .iter()
+            .find(|c| c.type_ == "Ready")
+            .expect("status carries Ready");
+        assert_eq!(ready.status, "True");
+        assert_eq!(status.observed_generation, generation);
+        assert_eq!(status.ready_replicas, 3);
+        assert_eq!(status.current_replicas, 3);
+        assert_eq!(status.bolt_addresses, vec!["pod-a".to_owned()]);
+    }
+
+    #[test]
+    fn partially_ready_pool_reports_ready_false_while_generation_still_tracks() {
+        let mut pool = pool_fixture();
+        pool.metadata.generation = Some(11);
+        let status = ready_status(&[], Some(11), 2, 3, pool.spec.replicas, Vec::new());
+        let ready = status
+            .conditions
+            .iter()
+            .find(|c| c.type_ == "Ready")
+            .expect("status carries Ready");
+        assert_eq!(
+            ready.status, "False",
+            "a partially ready pool must be Ready=False"
+        );
+        assert_eq!(
+            status.observed_generation,
+            Some(11),
+            "observedGeneration must still track generation while under-replicated"
+        );
+        assert_eq!(status.ready_replicas, 2);
+        assert_eq!(status.current_replicas, 3);
     }
 
     #[test]

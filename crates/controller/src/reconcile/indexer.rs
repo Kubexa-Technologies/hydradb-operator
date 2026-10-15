@@ -46,7 +46,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, 
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 use kube::Resource as _;
 use kube::ResourceExt as _;
-use kube::api::{Api, DeleteParams, Patch, PatchParams};
+use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams};
 use kube::runtime::controller::Action;
 
 use super::cluster::{DEFAULT_AUTH_KEY, SUCCESS_REQUEUE_SECS, policy_reason};
@@ -54,7 +54,7 @@ use crate::apply::{
     ROLE_AUTH, ROLE_CONFIG, ROLE_PDB, apply_child, cluster_child_name, indexer_child_name,
     standard_labels,
 };
-use crate::conditions::{live_conditions, new_condition, set_ready};
+use crate::conditions::{new_condition, set_ready};
 use crate::context::Ctx;
 use crate::error::{Error, ErrorClass};
 use crate::metrics;
@@ -494,7 +494,7 @@ pub fn desired_pdb(
 }
 
 /// Desired status for the disabled path: `Ready=False`/`Disabled` plus
-/// `Ready` replicas pinned at 0.
+/// replica counts pinned at 0 and no served generation.
 fn disabled_status(generation: Option<i64>) -> GraphIndexerStatus {
     let reason = disabled_reason_label();
     GraphIndexerStatus {
@@ -523,31 +523,49 @@ fn disabled_status(generation: Option<i64>) -> GraphIndexerStatus {
         ],
         observed_generation: generation,
         ready_replicas: 0,
+        current_replicas: 0,
         current_generation_label: None,
     }
 }
 
-/// Desired status for the success path: kstatus `Ready` over the live set.
+/// Desired status for the success path: kstatus `Ready` over the live set,
+/// plus `readyReplicas`/`currentReplicas` and the served
+/// `currentGenerationLabel`.
+///
+/// `Ready` is `True` only when every desired replica reports ready; a
+/// partially ready indexer is `Ready=False` (still converging) while
+/// `observed_generation` keeps tracking the reconciled generation.
+/// `observed_generation` is the reconciler-observed `metadata.generation`,
+/// never advanced optimistically.
 fn ready_status(
     live_conditions_set: &[k8s_openapi::apimachinery::pkg::apis::meta::v1::Condition],
     generation: Option<i64>,
     ready_replicas: i32,
+    current_replicas: i32,
+    desired_replicas: i32,
+    current_generation_label: Option<String>,
 ) -> GraphIndexerStatus {
     let mut conditions = live_conditions_set.to_vec();
-    set_ready(&mut conditions, true, generation);
+    set_ready(
+        &mut conditions,
+        crate::status::is_fully_ready(ready_replicas, desired_replicas),
+        generation,
+    );
     GraphIndexerStatus {
         conditions,
         observed_generation: generation,
         ready_replicas,
-        current_generation_label: None,
+        current_replicas,
+        current_generation_label,
     }
 }
 
 /// Patch the `/status` subresource when the desired status differs from live.
 ///
-/// The comparison is field-exact, so an unchanged status produces NO write
-/// and never hot-loops (todo 24 owns the full status writer; this covers only
-/// the fields todo 21 sets).
+/// The comparison is field-exact over the full surface (`conditions`,
+/// `observedGeneration`, `readyReplicas`, `currentReplicas`,
+/// `currentGenerationLabel`), so an unchanged status produces NO write and
+/// never hot-loops. The patch touches `/status` only, never `spec`.
 ///
 /// # Errors
 ///
@@ -562,17 +580,10 @@ async fn write_status_if_changed(
         conditions: Vec::new(),
         observed_generation: None,
         ready_replicas: 0,
+        current_replicas: 0,
         current_generation_label: None,
     });
-    let conditions_changed = !matches!(
-        live_conditions(&live_status.conditions, &desired.conditions),
-        crate::conditions::StatusUpdate::NoChange
-    );
-    if !conditions_changed
-        && live_status.observed_generation == desired.observed_generation
-        && live_status.ready_replicas == desired.ready_replicas
-        && live_status.current_generation_label == desired.current_generation_label
-    {
+    if !crate::status::indexer_status_needs_write(&live_status, desired) {
         return Ok(());
     }
     api.patch_status(
@@ -582,6 +593,7 @@ async fn write_status_if_changed(
             "conditions": desired.conditions,
             "observedGeneration": desired.observed_generation,
             "readyReplicas": desired.ready_replicas,
+            "currentReplicas": desired.current_replicas,
             "currentGenerationLabel": desired.current_generation_label,
         })),
     )
@@ -644,23 +656,51 @@ async fn reconcile_inner(indexer: Arc<GraphIndexer>, ctx: Arc<Ctx>) -> Result<Ac
         return Ok(Action::requeue(Duration::from_secs(SUCCESS_REQUEUE_SECS)));
     }
 
-    let ready_replicas = deployments
+    let (ready_replicas, current_replicas) = deployments
         .get_opt(&indexer_child_name(&name))
         .await
         .map_err(Error::from_kube_error)?
         .and_then(|deployment| deployment.status)
-        .and_then(|status| status.ready_replicas)
-        .unwrap_or(0);
+        .map(|status| {
+            (
+                status.ready_replicas.unwrap_or(0),
+                status.replicas.unwrap_or(0),
+            )
+        })
+        .unwrap_or_default();
     let live = indexers.get(&name).await.map_err(Error::from_kube_error)?;
-    let live_conditions_set = live
-        .status
-        .as_ref()
+    let live_status = live.status.as_ref();
+    let live_conditions_set = live_status
         .map(|status| status.conditions.clone())
         .unwrap_or_default();
+    // The indexer's SINGLE child-state list: one `Api::list` of indexer pods
+    // scoped by the cluster label, never N per-pod gets. The served
+    // generation label is the maximum pod label, falling back to the live
+    // preserved value when no pod carries it.
+    let pods_api =
+        Api::<k8s_openapi::api::core::v1::Pod>::namespaced(ctx.client.clone(), &namespace);
+    let indexer_pods = pods_api
+        .list(&ListParams::default().labels(&crate::status::indexer_pod_selector(&cluster_ref)))
+        .await
+        .map_err(Error::from_kube_error)?
+        .items;
+    let pod_label_sets: Vec<Option<std::collections::BTreeMap<String, String>>> = indexer_pods
+        .iter()
+        .map(|pod| pod.metadata.labels.clone())
+        .collect();
+    let live_generation_label =
+        live_status.and_then(|status| status.current_generation_label.clone());
     write_status_if_changed(
         &indexers,
         &name,
-        &ready_status(&live_conditions_set, generation, ready_replicas),
+        &ready_status(
+            &live_conditions_set,
+            generation,
+            ready_replicas,
+            current_replicas,
+            indexer.spec.replicas,
+            crate::status::current_generation_label(&pod_label_sets, live_generation_label),
+        ),
     )
     .await?;
 
@@ -917,6 +957,46 @@ mod tests {
         assert_eq!(ready.status, "False");
         assert_eq!(ready.reason, "Disabled");
         assert_eq!(status.ready_replicas, 0);
+        assert_eq!(status.current_replicas, 0);
+        assert_eq!(status.current_generation_label, None);
+    }
+
+    #[test]
+    fn ready_status_tracks_generation_and_marks_partial_replicas_not_ready() {
+        let indexer = indexer_fixture(true);
+        let generation = indexer.meta().generation;
+        let full = ready_status(
+            &[],
+            generation,
+            2,
+            2,
+            indexer.spec.replicas,
+            Some("gen-7".to_owned()),
+        );
+        let ready = full
+            .conditions
+            .iter()
+            .find(|c| c.type_ == "Ready")
+            .expect("status carries Ready");
+        assert_eq!(ready.status, "True");
+        assert_eq!(full.observed_generation, generation);
+        assert_eq!(full.current_replicas, 2);
+        assert_eq!(full.current_generation_label.as_deref(), Some("gen-7"));
+
+        let partial = ready_status(&[], generation, 1, 2, indexer.spec.replicas, None);
+        let ready = partial
+            .conditions
+            .iter()
+            .find(|c| c.type_ == "Ready")
+            .expect("status carries Ready");
+        assert_eq!(
+            ready.status, "False",
+            "a partially ready indexer must be Ready=False"
+        );
+        assert_eq!(
+            partial.observed_generation, generation,
+            "observedGeneration must still track generation while under-replicated"
+        );
     }
 
     #[test]

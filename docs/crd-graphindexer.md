@@ -176,5 +176,6 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | status.conditions[].status | string | required |  | status of the condition, one of True, False, Unknown. |
 | status.conditions[].type | string | required |  | type of condition in CamelCase or in foo.example.com/CamelCase. |
 | status.currentGenerationLabel | string | optional |  | Label of the currently served index generation. |
+| status.currentReplicas | integer | optional | 0 | Current indexer replicas (observed on the Deployment). |
 | status.observedGeneration | integer | optional |  | Last reconciled generation. |
 | status.readyReplicas | integer | optional | 0 | Ready indexer replicas. |

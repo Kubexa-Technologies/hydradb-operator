@@ -52,7 +52,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hydradb_operator_api::constants;
-use hydradb_operator_api::crd::{DeletionPolicy, GraphCluster, GraphClusterStatus};
+use hydradb_operator_api::crd::{DeletionPolicy, Endpoints, GraphCluster, GraphClusterStatus};
 use hydradb_operator_api::spec::{PhaseLabel as _, S3};
 use hydradb_operator_api::validation::ValidationError;
 use k8s_openapi::ByteString;
@@ -73,7 +73,7 @@ use crate::apply::{
     ROLE_AUTH, ROLE_BOLT, ROLE_CONFIG, ROLE_HTTPS, ROLE_METRICS, ROLE_NETPOL, ROLE_SERVICEMONITOR,
     child_object_meta, cluster_child_name, owner_ref_for, standard_labels,
 };
-use crate::conditions::{STALLED, live_conditions, new_condition, set_ready};
+use crate::conditions::{STALLED, new_condition, set_ready};
 use crate::context::Ctx;
 use crate::error::{Error, ErrorClass, STRUCTURAL_REQUEUE_SECS};
 use crate::metrics;
@@ -892,29 +892,37 @@ fn stalled_status(
     }
 }
 
-/// Desired status for the success path: kstatus `Ready` over the live set.
+/// Desired status for the success path: kstatus `Ready` over the live set,
+/// plus the full todo-24 surface: advertised `endpoints`, live
+/// `node_addresses` and the resolved `observed_object_store`.
+///
+/// `observed_generation` is the reconciler-observed `metadata.generation`:
+/// callers pass the generation of the object they actually reconciled, never
+/// an optimistically advanced value.
 fn ready_status(
     live_conditions_set: &[k8s_openapi::apimachinery::pkg::apis::meta::v1::Condition],
     generation: Option<i64>,
     observed_object_store: String,
+    endpoints: Endpoints,
+    node_addresses: Vec<String>,
 ) -> GraphClusterStatus {
     let mut conditions = live_conditions_set.to_vec();
     set_ready(&mut conditions, true, generation);
     GraphClusterStatus {
         conditions,
         observed_generation: generation,
-        endpoints: hydradb_operator_api::crd::Endpoints::default(),
-        node_addresses: Vec::new(),
+        endpoints,
+        node_addresses,
         observed_object_store: Some(observed_object_store),
     }
 }
 
 /// Patch the `/status` subresource when the desired status differs from live.
 ///
-/// The comparison is field-exact via [`live_conditions`] plus the scalar
-/// fields, so an unchanged status produces NO write and never hot-loops
-/// (todo 24 owns the full status writer; this covers only the fields todo 18
-/// sets).
+/// The comparison is field-exact over the full surface (`conditions`,
+/// `observedGeneration`, `endpoints`, `nodeAddresses`,
+/// `observedObjectStore`), so an unchanged status produces NO write and never
+/// hot-loops. The patch touches `/status` only, never `spec`.
 ///
 /// # Errors
 ///
@@ -928,18 +936,11 @@ async fn write_status_if_changed(
     let live_status = live.status.clone().unwrap_or_else(|| GraphClusterStatus {
         conditions: Vec::new(),
         observed_generation: None,
-        endpoints: hydradb_operator_api::crd::Endpoints::default(),
+        endpoints: Endpoints::default(),
         node_addresses: Vec::new(),
         observed_object_store: None,
     });
-    let conditions_changed = !matches!(
-        live_conditions(&live_status.conditions, &desired.conditions),
-        crate::conditions::StatusUpdate::NoChange
-    );
-    if !conditions_changed
-        && live_status.observed_generation == desired.observed_generation
-        && live_status.observed_object_store == desired.observed_object_store
-    {
+    if !crate::status::cluster_status_needs_write(&live_status, desired) {
         return Ok(());
     }
     api.patch_status(
@@ -948,6 +949,8 @@ async fn write_status_if_changed(
         &Patch::Merge(serde_json::json!({
             "conditions": desired.conditions,
             "observedGeneration": desired.observed_generation,
+            "endpoints": desired.endpoints,
+            "nodeAddresses": desired.node_addresses,
             "observedObjectStore": desired.observed_object_store,
         })),
     )
@@ -1050,9 +1053,11 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
     let config_api = Api::<ConfigMap>::namespaced(ctx.client.clone(), &namespace);
     // Recompute the routing table from LIVE node-pod membership on every
     // reconcile: never from `replicaCount`, never cached across reconciles.
+    // This is the reconciler's SINGLE child-state list: one `Api::list` of
+    // node pods scoped by the cluster label, never N per-pod gets. The same
+    // membership feeds both the routing table and `status.nodeAddresses`.
     let pods_api = Api::<Pod>::namespaced(ctx.client.clone(), &namespace);
-    let node_selector_label =
-        format!("app.kubernetes.io/instance={name},app.kubernetes.io/component=node");
+    let node_selector_label = crate::status::node_pod_selector(&name);
     let live_pod_names: Vec<String> = pods_api
         .list(&ListParams::default().labels(&node_selector_label))
         .await
@@ -1129,7 +1134,13 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
     write_status_if_changed(
         &clusters,
         &name,
-        &ready_status(&live_conditions_set, generation, resolved.source.clone()),
+        &ready_status(
+            &live_conditions_set,
+            generation,
+            resolved.source.clone(),
+            crate::status::cluster_endpoints(&cluster),
+            crate::status::sorted_bolt_addresses(&live_pod_names, &name, &namespace),
+        ),
     )
     .await?;
 
@@ -1586,6 +1597,76 @@ mod tests {
             "Stalled condition must name objectStore, got: {}",
             stalled.message
         );
+    }
+
+    #[test]
+    fn ready_status_carries_the_full_todo_24_surface() {
+        let cluster = cluster_fixture();
+        let generation = cluster.meta().generation;
+        let endpoints = crate::status::cluster_endpoints(&cluster);
+        let node_addresses =
+            crate::status::sorted_bolt_addresses(&["demo-node-0".to_owned()], "demo", "default");
+        let status = ready_status(
+            &[],
+            generation,
+            "explicit:my-bucket".to_owned(),
+            endpoints,
+            node_addresses,
+        );
+        assert_eq!(
+            status.observed_generation, generation,
+            "observedGeneration must equal the reconciled metadata.generation"
+        );
+        assert_eq!(
+            status.endpoints.bolt.as_deref(),
+            Some("demo-bolt.default.svc:7687"),
+            "endpoints.bolt must name the Bolt Service"
+        );
+        assert!(
+            status.endpoints.https.is_some() && status.endpoints.admin.is_some(),
+            "https and admin endpoints must be set"
+        );
+        assert_eq!(
+            status.node_addresses.len(),
+            1,
+            "one live pod means one node address"
+        );
+        assert_eq!(
+            status.observed_object_store.as_deref(),
+            Some("explicit:my-bucket")
+        );
+        let ready = status
+            .conditions
+            .iter()
+            .find(|c| c.type_ == "Ready")
+            .expect("ready status carries Ready");
+        assert_eq!(ready.status, "True");
+        assert_eq!(ready.observed_generation, generation);
+    }
+
+    #[test]
+    fn observed_generation_tracks_a_spec_change_generation() {
+        let mut cluster = cluster_fixture();
+        cluster.metadata.generation = Some(9);
+        let status = ready_status(
+            &[],
+            cluster.meta().generation,
+            "explicit:my-bucket".to_owned(),
+            crate::status::cluster_endpoints(&cluster),
+            Vec::new(),
+        );
+        assert_eq!(
+            status.observed_generation,
+            Some(9),
+            "observedGeneration must advance to the new generation once reconciled"
+        );
+        for condition in &status.conditions {
+            assert_eq!(
+                condition.observed_generation,
+                Some(9),
+                "every condition must track the reconciled generation"
+            );
+        }
     }
 
     #[test]

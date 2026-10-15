@@ -15,6 +15,7 @@ mod finalizer;
 mod metrics;
 mod reconcile;
 mod run;
+mod status;
 mod watcher;
 
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};

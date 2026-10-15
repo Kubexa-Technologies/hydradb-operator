@@ -164,6 +164,9 @@ pub struct GraphIndexerStatus {
     /// Ready indexer replicas.
     #[serde(default)]
     pub ready_replicas: i32,
+    /// Current indexer replicas (observed on the Deployment).
+    #[serde(default)]
+    pub current_replicas: i32,
     /// Label of the currently served index generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_generation_label: Option<String>,
