@@ -1,0 +1,161 @@
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: hydradb-operator-image-build
+  annotations:
+    pipelinesascode.tekton.dev/on-event: "[push]"
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-path-change: "[crates/**, charts/**, Dockerfile, .tekton/hydradb-operator-image-build.yaml]"
+spec:
+  params:
+    - name: repo_url
+      value: "{{repo_url}}"
+    - name: revision
+      value: "{{revision}}"
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      nodeSelector:
+        site: svt
+  workspaces:
+    - name: repo
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: 1Gi
+          storageClassName: ceph-cephfs
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
+    - name: docker-credentials
+      secret:
+        secretName: docker-config-kaniko-oss
+  timeouts:
+    pipeline: 1h
+  pipelineSpec:
+    params:
+      - name: repo_url
+        description: Full hydradb-operator repo URL (PaC {{repo_url}})
+      - name: revision
+        description: Git commit SHA to build (PaC {{revision}})
+    workspaces:
+      - name: repo
+        description: Repo checkout + build context
+      - name: basic-auth
+        description: PaC git credentials ({{ git_auth_secret }})
+      - name: docker-credentials
+        description: Harbor + GHCR push auth (docker-config-kaniko-oss secret, todo 44)
+    tasks:
+      - name: fetch-source
+        params:
+          - name: revision
+            value: $(params.revision)
+        taskSpec:
+          params:
+            - name: revision
+          workspaces:
+            - name: repo
+            - name: basic-auth
+          results:
+            - name: semver-tag
+              description: "{version from .version file}-{short sha}"
+          steps:
+            - name: clone
+              image: docker.io/alpine/git:2.54.0
+              script: |
+                set -euo pipefail
+                # PaC mounts its git credentials (pac-gitauth-*) here, bound to the
+                # external FQDN. Pod->gateway->gitea hairpin 503s, so remap the
+                # credential host to the internal service. -c forces this store
+                # file so ambient helpers (creds-init etc.) cannot interfere.
+                CREDS="$(workspaces.basic-auth.path)/.git-credentials"
+                sed -e 's#^https://#http://#' -e 's#@git.kubexa.tech#@gitea-http.gitea:3000#' "$CREDS" > "$HOME/.git-credentials"
+                chmod 600 "$HOME/.git-credentials"
+                export GIT_TERMINAL_PROMPT=0
+                find "$(workspaces.repo.path)" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+                git -c "credential.helper=store --file=$HOME/.git-credentials" clone --depth 1 --no-checkout http://gitea-http.gitea:3000/oss/hydradb-operator.git "$(workspaces.repo.path)"
+                git -C "$(workspaces.repo.path)" -c "credential.helper=store --file=$HOME/.git-credentials" fetch --depth 1 origin "$(params.revision)"
+                git -C "$(workspaces.repo.path)" checkout FETCH_HEAD
+                # Derive image tag: {v<semver> from .version}-{short sha}.
+                # .version holds the v-prefixed base tag (e.g. v0.1.0).
+                VER="$(cat "$(workspaces.repo.path)/.version")"
+                SHA="$(git -C "$(workspaces.repo.path)" rev-parse --short HEAD)"
+                printf '%s-%s' "$VER" "$SHA" | tee "$(results.semver-tag.path)"
+        workspaces:
+          - name: repo
+            workspace: repo
+          - name: basic-auth
+            workspace: basic-auth
+      - name: build-push
+        runAfter:
+          - fetch-source
+        taskSpec:
+          params:
+            - name: image-tag
+          workspaces:
+            - name: source
+            - name: docker-credentials
+          volumes:
+            - name: ca-bundle
+              configMap:
+                name: kaniko-ca-bundle
+          stepTemplate:
+            # Kaniko runs the Dockerfile against its own unpacked root; mounting
+            # the CA bundle at /etc/ssl/certs/ca-certificates.crt shadowed that
+            # path read-only and broke any image step touching it (apt's
+            # ca-certificates postinst, COPY of the bundle). Mount it at a
+            # neutral path and trust it via SSL_CERT_FILE instead.
+            env:
+              - name: SSL_CERT_FILE
+                value: /kaniko/ca/ca-certificates.crt
+            volumeMounts:
+              - name: ca-bundle
+                mountPath: /kaniko/ca/ca-certificates.crt
+                subPath: ca-certificates.crt
+                readOnly: true
+          steps:
+            - name: build-and-push
+              # Kaniko builds the repo-root Dockerfile (which uses the `bin=`
+              # export stage); the Rust build happens inside the Dockerfile,
+              # never in this step.
+              image: ghcr.io/osscontainertools/kaniko:v1.28.5
+              workspaces:
+                # kaniko reads config.json from $DOCKER_CONFIG (/kaniko/.docker).
+                # The docker-credentials workspace defaults to
+                # /workspace/docker-credentials, so mount it where kaniko looks;
+                # otherwise kaniko pushes anonymously -> UNAUTHORIZED.
+                - name: docker-credentials
+                  mountPath: /kaniko/.docker
+              args:
+                - --dockerfile=$(workspaces.source.path)/Dockerfile
+                - --context=$(workspaces.source.path)/
+                - --destination=harbor.kubexa.tech/oss/hydradb-operator:$(tasks.fetch-source.results.semver-tag)
+                - --destination=ghcr.io/kubexa/hydradb-operator:$(tasks.fetch-source.results.semver-tag)
+                # Dual-registry push from one step has NO precedent in this
+                # environment; todo 47 spikes whether kaniko accepts two
+                # destinations with a two-auth docker config, else splits it.
+                - --cache=true
+                - --cache-repo=harbor.kubexa.tech/oss/kaniko-cache
+                - --skip-tls-verify=false
+                - --skip-tls-verify-registry=harbor.kubexa.tech
+                - --snapshot-mode=redo
+              env:
+                - name: DOCKER_CONFIG
+                  value: /kaniko/.docker
+        params:
+          - name: image-tag
+            value: $(tasks.fetch-source.results.semver-tag)
+        workspaces:
+          - name: source
+            workspace: repo
+          - name: docker-credentials
+            workspace: docker-credentials
+      - name: force-sync
+        runAfter:
+          - build-push
+        taskRef:
+          name: eso-force-sync
