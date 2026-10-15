@@ -1,10 +1,13 @@
 //! Output-mode plumbing for the `hydradb` CLI.
 //!
-//! Todo 27 implements the [`OutputFormat::Json`] and [`OutputFormat::Name`]
-//! paths fully. [`OutputFormat::Table`], [`OutputFormat::Wide`] and
-//! [`OutputFormat::Yaml`] are intentionally thin wrappers that return
-//! [`crate::CliError::NotImplemented`] naming todo 30, which finalises the
-//! renderers. No table output is faked here.
+//! All five [`OutputFormat`] modes are finalised here (plan todo 30):
+//! `json` emits the exact Kubernetes object, `yaml` the same document as
+//! YAML, `name` emits lowercase `kind/name` lines, `table` a compact
+//! `KIND/NAMESPACE/NAME/STATUS` layout and `wide` the same plus
+//! `READY`/`AGE` columns. Read commands with richer rows (`status`,
+//! `endpoints`) build their own tables via [`render_table`] and route only
+//! `json`/`name` through [`Printer`]; the generic [`Printer`] table/wide
+//! paths below cover every other shape (notably `scale` output).
 
 use crate::CliError;
 use serde_json::{Value, json};
@@ -68,12 +71,12 @@ pub fn with_kind(mut value: Value, api_version: &str, kind: &str) -> Value {
 /// the exact Kubernetes object so it can be piped to `apply`/`jq`/`yq`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum OutputFormat {
-    /// Human-readable table (finalised in todo 30).
+    /// Human-readable table.
     #[default]
     Table,
-    /// Wider human-readable table (finalised in todo 30).
+    /// Wider human-readable table (adds `READY`/`AGE`).
     Wide,
-    /// Exact Kubernetes object as YAML (finalised in todo 30).
+    /// Exact Kubernetes object as YAML.
     Yaml,
     /// Exact Kubernetes object as JSON.
     Json,
@@ -95,41 +98,143 @@ impl Printer {
         Self { format }
     }
 
+    /// Render `value` to a string in the printer's format (pure, testable).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CliError::Output`] when the value cannot be rendered, and
+    /// [`CliError::Json`] when JSON serialisation fails.
+    pub fn render(&self, value: &Value) -> Result<String, CliError> {
+        match self.format {
+            OutputFormat::Json => {
+                let mut rendered = serde_json::to_string_pretty(value).map_err(CliError::Json)?;
+                rendered.push('\n');
+                Ok(rendered)
+            }
+            OutputFormat::Name => {
+                let mut out = String::new();
+                for line in name_lines(value)? {
+                    out.push_str(&line);
+                    out.push('\n');
+                }
+                Ok(out)
+            }
+            OutputFormat::Yaml => Ok(to_yaml(value)),
+            OutputFormat::Table => Ok(render_table(
+                &["KIND", "NAMESPACE", "NAME", "STATUS"],
+                &generic_rows(value, false),
+            )),
+            OutputFormat::Wide => Ok(render_table(
+                &["KIND", "NAMESPACE", "NAME", "STATUS", "READY", "AGE"],
+                &generic_rows(value, true),
+            )),
+        }
+    }
+
     /// Render `value` to stdout in the printer's format.
     ///
     /// # Errors
     ///
     /// Returns [`CliError::Output`] when the value cannot be rendered, and
-    /// [`CliError::NotImplemented`] for the `table`/`wide`/`yaml` formats
-    /// until todo 30 finalises them.
+    /// [`CliError::Json`] when JSON serialisation fails.
     pub fn print(&self, value: &Value) -> Result<(), CliError> {
-        match self.format {
-            OutputFormat::Json => {
-                let rendered = serde_json::to_string_pretty(value).map_err(CliError::Json)?;
-                println!("{rendered}");
-                Ok(())
-            }
-            OutputFormat::Name => {
-                for line in name_lines(value)? {
-                    println!("{line}");
-                }
-                Ok(())
-            }
-            // Thin wrappers on purpose: todo 30 owns the real renderers.
-            // Returning an honest error instead of faking table/yaml output.
-            OutputFormat::Table | OutputFormat::Wide | OutputFormat::Yaml => {
-                Err(CliError::NotImplemented {
-                    command: match self.format {
-                        OutputFormat::Table => "output:table",
-                        OutputFormat::Wide => "output:wide",
-                        OutputFormat::Yaml => "output:yaml",
-                        OutputFormat::Json | OutputFormat::Name => "output:unreachable",
-                    },
-                    owning_todo: 30,
-                })
-            }
-        }
+        print!("{}", self.render(value)?);
+        Ok(())
     }
+}
+
+/// One generic row per object in `value` (single object or `v1/List`).
+///
+/// Columns are `KIND`/`NAMESPACE`/`NAME` plus a kstatus-style `STATUS`
+/// derived from `status.conditions` (same precedence family as the `status`
+/// command: `Failed` beats `Ready` beats `InProgress`, else `Unknown`).
+/// With `wide`, `READY` (the `Ready` condition status) and `AGE`
+/// (`.metadata.creationTimestamp`) are appended.
+fn generic_rows(value: &Value, wide: bool) -> Vec<Vec<String>> {
+    let objects: Vec<&Value> = if value.get("items").is_some() {
+        value["items"]
+            .as_array()
+            .map_or_else(Vec::new, |items| items.iter().collect())
+    } else {
+        vec![value]
+    };
+    objects
+        .iter()
+        .map(|object| {
+            let text = |pointer: &str| {
+                object
+                    .pointer(pointer)
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let mut row = vec![
+                text("/kind"),
+                text("/metadata/namespace"),
+                text("/metadata/name"),
+                generic_status(object),
+            ];
+            if wide {
+                row.push(generic_ready(object));
+                row.push(text("/metadata/creationTimestamp"));
+            }
+            row
+        })
+        .collect()
+}
+
+/// Best-effort status string from `status.conditions` for generic tables.
+fn generic_status(object: &Value) -> String {
+    let conditions = object
+        .pointer("/status/conditions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let is_true = |want_type: &str| {
+        conditions.iter().any(|c| {
+            c.get("type").and_then(Value::as_str) == Some(want_type)
+                && c.get("status").and_then(Value::as_str) == Some("True")
+        })
+    };
+    if object
+        .pointer("/metadata/deletionTimestamp")
+        .is_some_and(|v| !v.is_null())
+    {
+        return "Terminating".to_string();
+    }
+    if is_true("Stalled") || is_true("Degraded") || is_true("Failed") {
+        return "Failed".to_string();
+    }
+    if is_true("Ready") {
+        return "Ready".to_string();
+    }
+    if is_true("Reconciling")
+        || conditions.iter().any(|c| {
+            c.get("type").and_then(Value::as_str) == Some("Ready")
+                && c.get("status").and_then(Value::as_str) == Some("False")
+        })
+    {
+        return "InProgress".to_string();
+    }
+    "Unknown".to_string()
+}
+
+/// Value of the `Ready` condition's `status`, or `Unknown` when absent.
+fn generic_ready(object: &Value) -> String {
+    object
+        .pointer("/status/conditions")
+        .and_then(Value::as_array)
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                (item.get("type").and_then(Value::as_str) == Some("Ready")).then(|| {
+                    item.get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Unknown")
+                        .to_string()
+                })
+            })
+        })
+        .unwrap_or_else(|| "Unknown".to_string())
 }
 
 /// Collect `kind/name` lines for a single object or a `v1/List`.
@@ -374,22 +479,58 @@ mod tests {
     }
 
     #[test]
-    fn table_wide_yaml_point_at_todo_30() {
-        for format in [OutputFormat::Table, OutputFormat::Wide, OutputFormat::Yaml] {
-            let err = Printer::new(format)
-                .print(&json!({}))
-                .expect_err("stub formats must fail honestly");
+    fn all_five_modes_render_the_same_fixture() {
+        let fixture = json!({
+            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "kind": "GraphNodePool",
+            "metadata": {
+                "name": "p",
+                "namespace": "demo",
+                "creationTimestamp": "2026-10-01T00:00:00Z",
+            },
+            "spec": {"replicas": 5},
+            "status": {"conditions": [
+                {"type": "Ready", "status": "True", "reason": "Available",
+                 "message": "", "lastTransitionTime": "2026-10-01T00:00:00Z"},
+            ]},
+        });
+
+        let name = Printer::new(OutputFormat::Name)
+            .render(&fixture)
+            .expect("name renders");
+        assert_eq!(name, "graphnodepool/p\n");
+
+        let wide = Printer::new(OutputFormat::Wide)
+            .render(&fixture)
+            .expect("wide renders");
+        for fragment in ["GraphNodePool", "demo", "p", "Ready", "True"] {
             assert!(
-                matches!(
-                    err,
-                    CliError::NotImplemented {
-                        owning_todo: 30,
-                        ..
-                    }
-                ),
-                "unexpected error: {err:?}"
+                wide.contains(fragment),
+                "wide carries `{fragment}`:\n{wide}"
             );
         }
+
+        let json = Printer::new(OutputFormat::Json)
+            .render(&fixture)
+            .expect("json renders");
+        let parsed: Value = serde_json::from_str(&json).expect("json parses back");
+        assert_eq!(parsed, fixture);
+
+        let yaml = Printer::new(OutputFormat::Yaml)
+            .render(&fixture)
+            .expect("yaml renders");
+        for fragment in ["kind: GraphNodePool", "name: p", "namespace: demo"] {
+            assert!(
+                yaml.contains(fragment),
+                "yaml carries `{fragment}`:\n{yaml}"
+            );
+        }
+
+        let table = Printer::new(OutputFormat::Table)
+            .render(&list_value(vec![fixture]))
+            .expect("table renders");
+        assert!(table.contains("GraphNodePool"), "table kind:\n{table}");
+        assert!(table.contains("Ready"), "table status:\n{table}");
     }
 
     #[test]
