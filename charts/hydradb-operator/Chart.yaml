@@ -6,10 +6,10 @@ type: application
 version: 0.1.0
 appVersion: 0.1.0
 kubeVersion: ">=1.26.0-0"
-home: https://git.kubexa.tech/kubexa-admin/HydraDB-Operator
+home: https://git.kubexa.tech/oss/hydradb-operator
 icon: file://icon.svg
 sources:
-  - https://git.kubexa.tech/kubexa-admin/HydraDB-Operator
+  - https://git.kubexa.tech/oss/hydradb-operator
   - https://helmforge.dev
 maintainers:
   - name: helmforge
@@ -22,9 +22,9 @@ annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/links: |
     - name: Source
-      url: https://git.kubexa.tech/kubexa-admin/HydraDB-Operator
+      url: https://git.kubexa.tech/oss/hydradb-operator
     - name: Docs
-      url: https://git.kubexa.tech/kubexa-admin/HydraDB-Operator
+      url: https://git.kubexa.tech/oss/hydradb-operator
   artifacthub.io/operator: "true"
   artifacthub.io/prerelease: "false"
   artifacthub.io/recommended-permissions: |

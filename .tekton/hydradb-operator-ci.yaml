@@ -83,7 +83,7 @@ spec:
                 chmod 600 "$HOME/.git-credentials"
                 export GIT_TERMINAL_PROMPT=0
                 find "$(workspaces.repo.path)" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
-                git -c "credential.helper=store --file=$HOME/.git-credentials" clone --depth 1 --no-checkout http://gitea-http.gitea:3000/kubexa-admin/HydraDB-Operator.git "$(workspaces.repo.path)"
+                git -c "credential.helper=store --file=$HOME/.git-credentials" clone --depth 1 --no-checkout http://gitea-http.gitea:3000/oss/hydradb-operator.git "$(workspaces.repo.path)"
                 git -C "$(workspaces.repo.path)" -c "credential.helper=store --file=$HOME/.git-credentials" fetch --depth 1 origin "$(params.revision)"
                 git -C "$(workspaces.repo.path)" checkout FETCH_HEAD
 
