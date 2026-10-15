@@ -102,17 +102,37 @@ spec:
           # inline rather than duplicating a build: tests first, then image.
           workspaces:
             - name: repo
+          # Same CA-bundle mount and toolchain pin as the standalone CI
+          # pipeline: the image's own bundle is not trustworthy on every node,
+          # and RUSTUP_TOOLCHAIN stops rustup from syncing a channel over the
+          # network.
+          volumes:
+            - name: ca-bundle
+              configMap:
+                name: kaniko-ca-bundle
           steps:
             - name: rust-checks
               image: docker.io/library/rust:1.92.0
               workingDir: $(workspaces.repo.path)
+              env:
+                - name: SSL_CERT_FILE
+                  value: /etc/ssl/certs/ca-certificates.crt
+                - name: RUSTUP_TOOLCHAIN
+                  value: 1.92.0-x86_64-unknown-linux-gnu
+              volumeMounts:
+                - name: ca-bundle
+                  mountPath: /etc/ssl/certs/ca-certificates.crt
+                  subPath: ca-certificates.crt
+                  readOnly: true
               script: |
                 #!/bin/sh
                 set -euo pipefail
                 # rust2go/bindgen needs libclang at build time, and every
                 # Tekton step is its own container, so install it here.
+                # ca-certificates is deliberately NOT installed: the bundle
+                # above is mounted read-only over that path.
                 apt-get update -qq
-                apt-get install -y -qq ca-certificates clang libclang-dev
+                apt-get install -y -qq clang libclang-dev
                 cargo fmt --all --check
                 cargo clippy --workspace --all-targets -- -D warnings
                 cargo test --workspace

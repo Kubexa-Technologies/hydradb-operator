@@ -99,17 +99,37 @@ spec:
         taskSpec:
           workspaces:
             - name: repo
+          # The image's own CA bundle is not trustworthy on every node, so mount
+          # the known-good bundle over it; RUSTUP_TOOLCHAIN pins the toolchain
+          # the image already ships so rustup never syncs a channel over the
+          # network (a sync fails outright when the system CA store is broken).
+          volumes:
+            - name: ca-bundle
+              configMap:
+                name: kaniko-ca-bundle
           steps:
             - name: gate
               image: docker.io/library/rust:1.92.0
               workingDir: $(workspaces.repo.path)
+              env:
+                - name: SSL_CERT_FILE
+                  value: /etc/ssl/certs/ca-certificates.crt
+                - name: RUSTUP_TOOLCHAIN
+                  value: 1.92.0-x86_64-unknown-linux-gnu
+              volumeMounts:
+                - name: ca-bundle
+                  mountPath: /etc/ssl/certs/ca-certificates.crt
+                  subPath: ca-certificates.crt
+                  readOnly: true
               script: |
                 set -euo pipefail
                 # rust2go pulls in bindgen, which needs libclang at build time.
                 # libclang is only needed for `cargo` itself, so it is installed
-                # in the same container that runs the build.
+                # in the same container that runs the build. ca-certificates is
+                # deliberately NOT installed: the bundle above is mounted
+                # read-only over that path.
                 apt-get update -qq
-                apt-get install -y -qq ca-certificates clang libclang-dev >/dev/null
+                apt-get install -y -qq clang libclang-dev >/dev/null
                 rustc --version
                 echo '==> cargo fmt --all --check'
                 cargo fmt --all --check
