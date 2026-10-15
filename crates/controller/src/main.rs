@@ -1,7 +1,8 @@
 //! HydraDB operator controller binary.
 //!
 //! The binary takes no flags: all configuration comes from the environment
-//! (`KUBECONFIG` / in-cluster config, `OPERATOR_NAMESPACE`, `RUST_LOG`).
+//! (`KUBECONFIG` / in-cluster config, `OPERATOR_NAMESPACE`, `OPERATOR_SCOPE`,
+//! `RUST_LOG`).
 //! Unknown arguments (including `--help`) are ignored so the binary stays a
 //! harmless no-op under `kubectl exec` probes and `--help` checks; there is
 //! deliberately no CLI framework here (see `crates/cli` for the `hydradb`

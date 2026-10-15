@@ -93,6 +93,10 @@ pub enum Error {
     #[error("invalid spec: {0}")]
     InvalidSpec(String),
 
+    /// `OPERATOR_SCOPE` carries an unknown value.
+    #[error("invalid OPERATOR_SCOPE {0:?}: valid values are `namespaced`, `cluster`")]
+    InvalidScope(String),
+
     /// A value failed validation.
     #[error("validation failed: {0}")]
     Validation(String),
@@ -148,6 +152,7 @@ impl Error {
             Error::Server(_) => ErrorClass::Transient,
             Error::Api(inner) => classify_kube_error(inner),
             Error::InvalidSpec(_) => ErrorClass::Structural,
+            Error::InvalidScope(_) => ErrorClass::Structural,
             Error::Validation(_) => ErrorClass::Structural,
             Error::MissingField(_) => ErrorClass::Structural,
             Error::UnresolvableRef(_) => ErrorClass::Structural,
@@ -288,6 +293,10 @@ mod tests {
         let io_err = || io::Error::new(io::ErrorKind::AddrInUse, "test bind");
         let cases: Vec<(Error, ErrorClass)> = vec![
             (Error::Server(io_err()), ErrorClass::Transient),
+            (
+                Error::InvalidScope("bogus".to_owned()),
+                ErrorClass::Structural,
+            ),
             (Error::InvalidSpec("bad".to_owned()), ErrorClass::Structural),
             (Error::Validation("bad".to_owned()), ErrorClass::Structural),
             (

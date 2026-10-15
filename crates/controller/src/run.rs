@@ -27,8 +27,11 @@ pub const HEALTH_ADDR: &str = "0.0.0.0:8080";
 /// Returns [`Error::Client`] when no usable kubeconfig/in-cluster config
 /// exists, or [`Error::Server`] when the health server cannot bind `:8080`.
 pub async fn run() -> Result<(), Error> {
+    // Parse the scope BEFORE building the client: an invalid OPERATOR_SCOPE
+    // must fail fast at startup even when no cluster is reachable.
+    let scope = crate::context::WatchScope::from_env()?;
     let client = kube::Client::try_default().await.map_err(Error::Client)?;
-    let ctx = Ctx::new(client)?;
+    let ctx = Ctx::new(client, scope)?;
     tracing::info!(
         namespace = %ctx.namespace,
         addr = HEALTH_ADDR,
@@ -69,7 +72,6 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
     use futures::StreamExt as _;
     use k8s_openapi::api::core::v1::{ConfigMap, Secret};
     use k8s_openapi::api::networking::v1::NetworkPolicy;
-    use kube::Api;
     use kube::runtime::Controller;
 
     use crate::apply::CLUSTER_SELECTOR_LABEL;
@@ -85,19 +87,19 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
         let owned_selector = CLUSTER_SELECTOR_LABEL;
         let running = Controller::new(clusters, watcher::watcher_config(&support))
             .owns(
-                Api::<ConfigMap>::all(client.clone()),
+                context.api::<ConfigMap>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .owns(
-                Api::<Secret>::all(client.clone()),
+                context.api::<Secret>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .owns(
-                Api::<NetworkPolicy>::all(client.clone()),
+                context.api::<NetworkPolicy>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .owns(
-                Api::<ServiceMonitorObject>::all(client.clone()),
+                context.api::<ServiceMonitorObject>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .with_config(watcher::controller_config())
@@ -126,7 +128,6 @@ fn spawn_graph_nodepool_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
     use futures::StreamExt as _;
     use k8s_openapi::api::apps::v1::StatefulSet;
     use k8s_openapi::api::policy::v1::PodDisruptionBudget;
-    use kube::Api;
     use kube::runtime::Controller;
 
     use crate::apply::CLUSTER_SELECTOR_LABEL;
@@ -141,11 +142,11 @@ fn spawn_graph_nodepool_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
         let owned_selector = CLUSTER_SELECTOR_LABEL;
         let running = Controller::new(pools, watcher::watcher_config(&support))
             .owns(
-                Api::<StatefulSet>::all(client.clone()),
+                context.api::<StatefulSet>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .owns(
-                Api::<PodDisruptionBudget>::all(client.clone()),
+                context.api::<PodDisruptionBudget>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .with_config(watcher::controller_config())
@@ -174,7 +175,6 @@ fn spawn_graph_indexer_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
     use futures::StreamExt as _;
     use k8s_openapi::api::apps::v1::Deployment;
     use k8s_openapi::api::policy::v1::PodDisruptionBudget;
-    use kube::Api;
     use kube::runtime::Controller;
 
     use crate::apply::CLUSTER_SELECTOR_LABEL;
@@ -189,11 +189,11 @@ fn spawn_graph_indexer_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
         let owned_selector = CLUSTER_SELECTOR_LABEL;
         let running = Controller::new(indexers, watcher::watcher_config(&support))
             .owns(
-                Api::<Deployment>::all(client.clone()),
+                context.api::<Deployment>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .owns(
-                Api::<PodDisruptionBudget>::all(client.clone()),
+                context.api::<PodDisruptionBudget>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .with_config(watcher::controller_config())

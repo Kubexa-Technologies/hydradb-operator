@@ -238,18 +238,22 @@ pub fn controller_config() -> controller::Config {
         .concurrency(CONTROLLER_CONCURRENCY)
 }
 
-/// Cluster-scoped metadata-only handle for watches whose reconciler does not
+/// Scope-aware metadata-only handle for watches whose reconciler does not
 /// need the full object.
 ///
 /// Backs `.watches()` over `Api<PartialObjectMeta<K>>`: the informer ships
 /// only `ObjectMeta`, cutting LIST payload for large child sets. The caller
 /// re-reads the full object inside `reconcile` when it needs the spec.
-pub fn metadata_api<K>(client: &Client) -> Api<PartialObjectMeta<K>>
+pub fn metadata_api<K>(
+    client: &Client,
+    scope: crate::context::WatchScope,
+    namespace: &str,
+) -> Api<PartialObjectMeta<K>>
 where
-    K: Resource,
+    K: Resource<Scope = kube::core::NamespaceResourceScope>,
     K::DynamicType: Default,
 {
-    Api::all(client.clone())
+    scope.api(client.clone(), namespace)
 }
 
 #[cfg(test)]
