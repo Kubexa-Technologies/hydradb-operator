@@ -224,14 +224,17 @@ fn render_doc(kind: &str, group: &str, version: &str, rows: &[FieldRow]) -> Stri
     doc
 }
 
-/// Generate one `docs/crd-<kind>.md` table per CRD kind, in stable kind order.
-pub fn run() -> anyhow::Result<()> {
+/// Render every per-kind reference table without writing.
+///
+/// Returns `(relative path, contents)` pairs so the `--check` drift gate can
+/// diff without writing.
+pub fn render_all() -> anyhow::Result<Vec<(String, String)>> {
     let crds: Vec<CustomResourceDefinition> = vec![
         GraphCluster::crd(),
         GraphNodePool::crd(),
         GraphIndexer::crd(),
     ];
-    let root = workspace_root();
+    let mut out = Vec::new();
     for crd in &crds {
         let (kind, group, version, schema) = schema_of(crd)?;
         let mut rows = Vec::new();
@@ -241,12 +244,18 @@ pub fn run() -> anyhow::Result<()> {
         }
         let doc = render_doc(&kind, &group, &version, &rows);
         let filename = doc_filename(&kind);
-        let path = root.join(OUTPUT_DIR).join(&filename);
-        write_if_different(&path, &doc)?;
-        println!(
-            "wrote {OUTPUT_DIR}/{filename} (kind {kind}, {} fields)",
-            rows.len()
-        );
+        out.push((format!("{OUTPUT_DIR}/{filename}"), doc));
+    }
+    Ok(out)
+}
+
+/// Generate one `docs/crd-<kind>.md` table per CRD kind, in stable kind order.
+pub fn run() -> anyhow::Result<()> {
+    let root = workspace_root();
+    for (rel, contents) in render_all()? {
+        let path = root.join(&rel);
+        write_if_different(&path, &contents)?;
+        println!("wrote {rel}");
     }
     Ok(())
 }

@@ -306,12 +306,23 @@ fn write_if_different(path: &Path, contents: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Generate the operator `ClusterRole` into `deploy/rbac/`.
-pub fn run() -> anyhow::Result<()> {
+/// Render the operator `ClusterRole` without writing.
+///
+/// Returns the `(relative path, contents)` pair so the `--check` drift gate
+/// can diff without writing.
+pub fn render_all() -> anyhow::Result<Vec<(String, String)>> {
     let rules = covered_kinds()?;
     let yaml = render(&rules)?;
-    let path = workspace_root().join(OUTPUT_FILE);
-    write_if_different(&path, &yaml)?;
-    println!("wrote {OUTPUT_FILE}");
+    Ok(vec![(OUTPUT_FILE.to_owned(), yaml)])
+}
+
+/// Generate the operator `ClusterRole` into `deploy/rbac/`.
+pub fn run() -> anyhow::Result<()> {
+    let root = workspace_root();
+    for (rel, contents) in render_all()? {
+        let path = root.join(&rel);
+        write_if_different(&path, &contents)?;
+        println!("wrote {rel}");
+    }
     Ok(())
 }

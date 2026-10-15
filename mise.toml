@@ -11,7 +11,7 @@ run = "cargo test --workspace"
 run = "cargo build --workspace --release"
 
 [tasks.check-drift]
-run = "cargo xtask gen-all --check"
+run = "cargo xtask check-drift"
 
 [tasks.e2e]
 run = "cargo run -p hydradb-operator-e2e"

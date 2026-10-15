@@ -57,22 +57,34 @@ fn crd_filename(crd: &CustomResourceDefinition) -> anyhow::Result<String> {
     Ok(format!("{plural}.{group}.yaml"))
 }
 
-/// Generate all three CRDs into both output directories.
-pub fn run() -> anyhow::Result<()> {
+/// Render all three CRDs for both output directories.
+///
+/// Returns `(relative path, contents)` pairs so the `--check` drift gate can
+/// diff without writing.
+pub fn render_all() -> anyhow::Result<Vec<(String, String)>> {
     let crds: Vec<CustomResourceDefinition> = vec![
         GraphCluster::crd(),
         GraphNodePool::crd(),
         GraphIndexer::crd(),
     ];
-    let root = workspace_root();
+    let mut out = Vec::new();
     for crd in &crds {
         let filename = crd_filename(crd)?;
         let yaml = render_crd(crd)?;
         for dir in OUTPUT_DIRS {
-            let path = root.join(dir).join(&filename);
-            write_if_different(&path, &yaml)?;
+            out.push((format!("{dir}/{filename}"), yaml.clone()));
         }
-        println!("wrote {filename} (kind {})", crd.spec.names.kind);
+    }
+    Ok(out)
+}
+
+/// Generate all three CRDs into both output directories.
+pub fn run() -> anyhow::Result<()> {
+    let root = workspace_root();
+    for (rel, contents) in render_all()? {
+        let path = root.join(&rel);
+        write_if_different(&path, &contents)?;
+        println!("wrote {rel}");
     }
     Ok(())
 }
