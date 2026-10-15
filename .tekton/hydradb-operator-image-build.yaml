@@ -221,7 +221,7 @@ spec:
                 - --dockerfile=$(workspaces.source.path)/Dockerfile
                 - --context=$(workspaces.source.path)/
                 - --destination=harbor.kubexa.tech/oss/hydradb-operator:$(tasks.fetch-source.results.semver-tag)
-                - --destination=ghcr.io/kubexa/hydradb-operator:$(tasks.fetch-source.results.semver-tag)
+                - --destination=ghcr.io/kubexa-technologies/hydradb-operator:$(tasks.fetch-source.results.semver-tag)
                 # Dual-registry push from one step has NO precedent in this
                 # environment; todo 47 spikes whether kaniko accepts two
                 # destinations with a two-auth docker config, else splits it.

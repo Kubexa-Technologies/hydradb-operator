@@ -6,7 +6,7 @@ Date: 2026-10-15 | Spike: plan row 47 (closes GAP-5) | Status: **method proven, 
 
 The image pipeline (`.tekton/hydradb-operator-image-build.yaml`, todo 40) declares a single
 kaniko step (`ghcr.io/osscontainertools/kaniko:v1.28.5`) with TWO `--destination` flags —
-`harbor.kubexa.tech/oss/hydradb-operator:<tag>` and `ghcr.io/kubexa/hydradb-operator:<tag>` —
+`harbor.kubexa.tech/oss/hydradb-operator:<tag>` and `ghcr.io/kubexa-technologies/hydradb-operator:<tag>` —
 fed by one docker config holding two `auths` (`docker-config-kaniko-oss`, todo 44).
 GHCR is pull-only in this cluster today: no dual-registry push had ever been proven here,
 so row 47 exists to prove it or split it.
@@ -41,7 +41,7 @@ at `/kaniko/ca/ca-certificates.crt` via `SSL_CERT_FILE`, `--skip-tls-verify-regi
 TaskRuns, pods, PVCs and Secrets (raw logs in `.omo/evidence/task-47-hydradb-operator.txt`):
 
 1. **Dual-destination, scope-limited GHCR token** → step FAILED LOUDLY, pre-build:
-   `error checking push permissions ... "ghcr.io/kubexa/spike47-kaniko-dual-push:spike47" ...
+   `error checking push permissions ... "ghcr.io/kubexa-technologies/spike47-kaniko-dual-push:spike47" ...
    DENIED: permission_denied`. Harbor received NOTHING (`crane manifest ... :spike47` exit 1,
    NOT_FOUND). Kaniko checks every destination before building — no partial push.
 2. **Harbor-only destination** → step SUCCEEDED. `crane manifest
@@ -72,7 +72,7 @@ built unless a future full-credential run disproves this.
 
 - Re-run the dual push ONCE with real credentials after talos-stack is pushed and Flux has
   synced `docker-config-kaniko-oss` (then `crane manifest` both
-  `harbor.kubexa.tech/oss/hydradb-operator:<tag>` and `ghcr.io/kubexa/hydradb-operator:<tag>`).
+  `harbor.kubexa.tech/oss/hydradb-operator:<tag>` and `ghcr.io/kubexa-technologies/hydradb-operator:<tag>`).
   One PipelineRun with the production file is enough — the method is settled.
 - Row 47 acceptance ("both registries return the pushed tag") is NOT yet met, so its checkbox
   stays unchecked deliberately; checking it now would fake the spike. Unblocks rows 46/53 on the
