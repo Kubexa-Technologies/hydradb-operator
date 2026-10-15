@@ -1,0 +1,25 @@
+Thank you for installing {{ .Chart.Name }} {{ .Chart.Version }}.
+
+The operator is running in {{ .Values.installScope }} scope:
+{{- if eq .Values.installScope "cluster" }}
+  Cluster-wide: watches GraphCluster, GraphNodePool and GraphIndexer in all
+  namespaces via the ClusterRole {{ include "hydradb-operator.fullname" . }}.
+{{- else }}
+  Namespaced: watches its own namespace ({{ .Release.Namespace }}) only via
+  the Role {{ include "hydradb-operator.fullname" . }}.
+{{- end }}
+
+Health endpoint: http://{{ include "hydradb-operator.fullname" . }}.{{ .Release.Namespace }}.svc:8080/healthz
+Metrics endpoint: http://{{ include "hydradb-operator.fullname" . }}.{{ .Release.Namespace }}.svc:8080/metrics
+
+CRD upgrade path:
+  The CustomResourceDefinitions in charts/hydradb-operator/crds/ are
+  install-only. Helm installs them on first install but NEVER upgrades them
+  on `helm upgrade` (Helm crds/ semantics). To pick up CRD changes, apply
+  the new CRDs explicitly before upgrading the release:
+
+    kubectl apply --server-side -f charts/hydradb-operator/crds/
+    helm upgrade <release> charts/hydradb-operator
+
+  The canonical CRD source is `cargo xtask gen-crds` output (deploy/crds/);
+  charts/hydradb-operator/crds/ must stay byte-identical to it.
