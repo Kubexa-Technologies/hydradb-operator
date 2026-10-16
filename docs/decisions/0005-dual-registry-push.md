@@ -1,6 +1,6 @@
 # 0005 — Dual-registry kaniko push method
 
-Date: 2026-10-15 | Spike: plan row 47 (closes GAP-5) | Status: **method proven, credential delivery pending**
+Date: 2026-10-15 | Spike: plan row 47 (closes GAP-5) | Status: **proven end-to-end with the production credentials**
 
 ## Context
 
@@ -68,15 +68,31 @@ independently, pre-checks push permission for ALL destinations before building, 
 whole step loudly when any credential is bad. The fallback exists only on paper and must NOT be
 built unless a future full-credential run disproves this.
 
-## Consequences / remaining work (not this spike's to finish)
+## End-to-end confirmation with the production credentials (row 47 acceptance MET)
 
-- Re-run the dual push ONCE with real credentials after talos-stack is pushed and Flux has
-  synced `docker-config-kaniko-oss` (then `crane manifest` both
-  `harbor.kubexa.tech/oss/hydradb-operator:<tag>` and `ghcr.io/kubexa-technologies/hydradb-operator:<tag>`).
-  One PipelineRun with the production file is enough — the method is settled.
-- Row 47 acceptance ("both registries return the pushed tag") is NOT yet met, so its checkbox
-  stays unchecked deliberately; checking it now would fake the spike. Unblocks rows 46/53 on the
-  METHOD (settled here) but not on credential delivery.
+The blocker above cleared when talos-stack was pushed and Flux reconciled `apps-secrets`:
+`externalsecret/docker-config-kaniko-oss` in `tekton-tasks` now reports
+`Ready=True, reason=SecretSynced`, and its docker config holds exactly two hosts —
+`["harbor.kubexa.tech","ghcr.io"]`. The PRODUCTION pipeline (`.tekton/hydradb-operator-image-build.yaml`,
+row 40, single kaniko step, two `--destination` flags) has since run on `main` and pushed both
+tags. Verified per registry with `crane digest`, using the synced production docker config:
+
+| tag | harbor.kubexa.tech/oss/hydradb-operator | ghcr.io/kubexa-technologies/hydradb-operator |
+| --- | --- | --- |
+| `v0.1.0-c206ef8` | `sha256:11d4e282baa91a800a64fef33cdf66d37b1a07e4c031f6ef307c92ac1fabbc4b` | identical |
+| `v0.1.0-1e2e9c2` | `sha256:3e0af83200abdaa9ca8732d35cd1eb4fea763caa63a68835d278e64685d967b4` | identical |
+
+Both registries return the same manifest digest for the same tag, from ONE kaniko step and ONE
+two-auth docker config. This is the acceptance criterion row 47 asked for: "both registries
+return the pushed tag (`crane manifest` or `skopeo inspect` exits 0 for both)".
+
+## Consequences
+
+- **Rows 46 and 53 are unblocked for real** — not just on the method, but on credential delivery.
+- The failure mode proven above still holds: kaniko pre-checks push permission for ALL
+  destinations before building, so a bad credential fails the whole step loudly and no
+  partial/silent single-registry success is possible.
 - Residual: `harbor.kubexa.tech/home-ops/spike47-kaniko-dual-push:spike47` (232-byte layer,
   scratch proof image) could not be deleted — the CI robot gets HTTP 403 on artifact DELETE.
-  Home-ops project admins can purge it; harmless until then. Nothing was ever pushed to GHCR.
+  Home-ops project admins can purge it; harmless until then. Nothing was ever pushed to GHCR
+  by the throwaway spike; the GHCR tags above come from the production pipeline.
