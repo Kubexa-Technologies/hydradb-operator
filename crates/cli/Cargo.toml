@@ -29,4 +29,4 @@ tracing-subscriber.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 futures.workspace = true
-object_store = { version = "0.12", features = ["aws"], optional = true }
+object_store = { version = "0.14", features = ["aws"], optional = true }

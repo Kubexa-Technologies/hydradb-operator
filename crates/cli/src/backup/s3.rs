@@ -8,9 +8,9 @@
 //! copy one object. The copy streams through memory a single object at a time,
 //! never the whole prefix.
 
-use object_store::ObjectStore;
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path;
+use object_store::{ObjectStore, ObjectStoreExt as _};
 
 use super::{BackupError, ObjectEntry, ObjectSink, optional};
 
