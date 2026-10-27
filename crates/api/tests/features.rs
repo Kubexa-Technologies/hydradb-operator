@@ -86,9 +86,15 @@ fn subnamespace_components_must_be_single_lowercase_labels() {
     spec.graph.subnamespaces = vec!["Team".to_string()];
     assert!(spec.validate().is_err(), "uppercase must fail");
 
+    // Depth and component rules still apply, but until the operand grows a
+    // path-level input the field itself is rejected rather than silently
+    // ignored, so both cases fail — for different reasons.
     let mut spec = cluster_spec();
     spec.graph.subnamespaces = (0..7).map(|i| format!("level{i}")).collect();
-    spec.validate().expect("seven nested levels are legal");
+    let errs = spec
+        .validate()
+        .expect_err("nested subnamespaces are unsupported");
+    assert!(fields(&errs).contains(&"graph.subnamespaces".to_string()));
 }
 
 // --- TLS / cert-manager ----------------------------------------------------

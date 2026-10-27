@@ -641,31 +641,27 @@ pub fn tuning_env(tuning: &TuningSpec) -> BTreeMap<String, String> {
 
 // --- role + identity env ---------------------------------------------------
 
-/// Env vars that encode a pool's role and stable node identity.
+/// Env vars that carry a node's stable identity.
 ///
-/// `GRAPH_NODE_ID` comes from the downward API (`metadata.name`), so placement
-/// heartbeats stay stable across restarts without the operator reading pods.
+/// Only `GRAPH_NODE_ID` is emitted: the operand reads it from the downward API
+/// (`metadata.name`) and uses it for placement heartbeats, so identity survives
+/// restarts without the operator reading pods. There is deliberately **no**
+/// role env var — the operand does not read one; a reader/writer distinction is
+/// expressed through `GRAPH_READ_ROUTING` and the writer lease instead.
 #[must_use]
-pub fn role_env(role: &NodeRole) -> Vec<EnvVar> {
+pub fn role_env(_role: &NodeRole) -> Vec<EnvVar> {
     use hydradb_operator_api::constants as c;
-    vec![
-        EnvVar {
-            name: c::GRAPH_NODE_ROLE.to_owned(),
-            value: Some(role.label().to_owned()),
-            ..EnvVar::default()
-        },
-        EnvVar {
-            name: c::GRAPH_NODE_ID.to_owned(),
-            value_from: Some(EnvVarSource {
-                field_ref: Some(ObjectFieldSelector {
-                    api_version: Some("v1".to_owned()),
-                    field_path: "metadata.name".to_owned(),
-                }),
-                ..EnvVarSource::default()
+    vec![EnvVar {
+        name: c::GRAPH_NODE_ID.to_owned(),
+        value_from: Some(EnvVarSource {
+            field_ref: Some(ObjectFieldSelector {
+                api_version: Some("v1".to_owned()),
+                field_path: "metadata.name".to_owned(),
             }),
-            ..EnvVar::default()
-        },
-    ]
+            ..EnvVarSource::default()
+        }),
+        ..EnvVar::default()
+    }]
 }
 
 /// Read routing value implied by a role: readers are told to follow, writers to
@@ -827,15 +823,17 @@ mod tests {
     }
 
     #[test]
-    fn role_env_sets_the_role_and_a_downward_api_identity() {
+    fn role_env_carries_identity_and_never_an_invented_role_variable() {
         let env = role_env(&NodeRole::Reader);
-        assert_eq!(env.len(), 2);
-        assert_eq!(env[0].name, c::GRAPH_NODE_ROLE);
-        assert_eq!(env[0].value.as_deref(), Some("reader"));
-        assert_eq!(env[1].name, c::GRAPH_NODE_ID);
+        assert_eq!(env.len(), 1, "only GRAPH_NODE_ID is real");
+        assert_eq!(env[0].name, c::GRAPH_NODE_ID);
         assert!(
-            env[1].value_from.is_some(),
+            env[0].value_from.is_some(),
             "node id must come from the downward API"
+        );
+        assert!(
+            env.iter().all(|var| !var.name.contains("ROLE")),
+            "the operand reads no role variable; emitting one would be a silent no-op"
         );
     }
 

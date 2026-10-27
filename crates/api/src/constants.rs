@@ -143,12 +143,8 @@ pub const GRAPH_TLS_PRIVATE_KEY: &str = "GRAPH_TLS_PRIVATE_KEY";
 
 // --- Node role and multi-tenancy -------------------------------------------
 
-/// Declared node role (`all`, `writer`, `reader`).
-pub const GRAPH_NODE_ROLE: &str = "GRAPH_NODE_ROLE";
 /// Stable per-pod node identity used by placement heartbeats.
 pub const GRAPH_NODE_ID: &str = "GRAPH_NODE_ID";
-/// Comma-joined nested subnamespace path below `GRAPH_NAMESPACE`.
-pub const GRAPH_SUBNAMESPACE_PATH: &str = "GRAPH_SUBNAMESPACE_PATH";
 
 // --- Backup / restore job contract ----------------------------------------
 

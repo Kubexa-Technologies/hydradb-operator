@@ -58,8 +58,6 @@ pub const OPERATOR_OWNED_ENV: &[&str] = &[
     constants::GRAPH_CELL_ID,
     constants::GRAPH_CELLS,
     constants::GRAPH_BOLT_NODE_ADDRESSES,
-    constants::GRAPH_SUBNAMESPACE_PATH,
-    constants::GRAPH_NODE_ROLE,
     constants::GRAPH_NODE_ID,
     constants::AWS_BUCKET_NAME,
     constants::AWS_DEFAULT_REGION,
@@ -233,6 +231,18 @@ impl GraphClusterSpec {
                      namespace; got {}",
                     self.graph.subnamespaces.len()
                 ),
+            ));
+        }
+        if !self.graph.subnamespaces.is_empty() {
+            // The operand validates `GRAPH_NAMESPACE` as a single component and
+            // has no env var for a nested path: nested scopes are addressed per
+            // request (`X-Graph-Namespace`) or by their storage path. Emitting
+            // nothing here would make the field a silent no-op, so it is
+            // rejected until the operand exposes a path-level input.
+            errors.push(ValidationError::new(
+                "graph.subnamespaces",
+                "nested subnamespaces are not supported yet: the operand addresses scopes per \
+                 request, not through an environment variable",
             ));
         }
         for (index, component) in self.graph.subnamespaces.iter().enumerate() {

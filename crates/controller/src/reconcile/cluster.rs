@@ -759,14 +759,6 @@ pub fn config_data(
     for (key, value) in crate::children::tuning_env(&spec.tuning) {
         data.insert(key, value);
     }
-    // Nested subnamespaces are addressed by their own variable; the root stays
-    // in GRAPH_NAMESPACE so a tree of clusters can share one tenant.
-    if !spec.graph.subnamespaces.is_empty() {
-        data.insert(
-            constants::GRAPH_SUBNAMESPACE_PATH.to_owned(),
-            spec.graph.subnamespaces.join("."),
-        );
-    }
     data
 }
 
