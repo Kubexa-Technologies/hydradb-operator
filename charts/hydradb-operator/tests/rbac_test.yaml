@@ -63,6 +63,8 @@ tests:
               - graphclusters
               - graphnodepools
               - graphindexers
+              - graphbackups
+              - graphingestsources
             verbs:
               - get
               - list

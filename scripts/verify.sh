@@ -57,6 +57,28 @@ step "kubeconform -strict: default render"
 helm template hydradb-operator "$CHART" |
   kubeconform -strict -summary -schema-location default -schema-location "$CRDS_CATALOG" -
 
+# The CRDs live in charts/*/crds/ and Helm installs them on its own, so a plain
+# `helm template` never renders them. Their SCHEMA validity is enforced by the
+# envtest suite (a real apiserver rejects an unrepresentable schema); this check
+# covers the packaging contract instead: exactly one manifest per kind, all five
+# kinds present, in both rendered scopes.
+step "CRD bundle contract: five kinds, both scopes, from the chart itself"
+for scope in namespaced cluster; do
+  rendered=$(helm template hydradb-operator "$CHART" --include-crds --set "installScope=$scope")
+  kinds=$(printf '%s\n' "$rendered" | grep -c '^kind: CustomResourceDefinition$' || true)
+  if [ "$kinds" -ne 5 ]; then
+    printf 'expected 5 CustomResourceDefinitions with installScope=%s, got %s\n' "$scope" "$kinds" >&2
+    exit 1
+  fi
+  actual=$(printf '%s\n' "$rendered" | sed -n 's/^  name: \(graph[a-z]*\.hydradb\.kubexa\.tech\)$/\1/p' | sort | tr '\n' ' ')
+  expected="graphbackups.hydradb.kubexa.tech graphclusters.hydradb.kubexa.tech graphindexers.hydradb.kubexa.tech graphingestsources.hydradb.kubexa.tech graphnodepools.hydradb.kubexa.tech "
+  if [ "$actual" != "$expected" ]; then
+    printf 'CRD names mismatch with installScope=%s\n  expected: %s\n  actual:   %s\n' "$scope" "$expected" "$actual" >&2
+    exit 1
+  fi
+  printf '    -> installScope=%s: 5 CRDs present\n' "$scope"
+done
+
 step "kubeconform -strict: every ci/ scenario"
 shopt -s nullglob
 for values_file in "$CHART"/ci/*values.yaml; do
