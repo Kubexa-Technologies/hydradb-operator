@@ -69,7 +69,7 @@ fn crd_emission_pins_group_version_kind_plural_shortnames_scope_and_columns() {
 
 fn valid_cluster_value() -> serde_json::Value {
     json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphCluster",
         "metadata": { "name": "example", "namespace": "default" },
         "spec": {

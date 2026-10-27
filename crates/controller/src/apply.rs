@@ -21,7 +21,7 @@ use kube::api::{Api, Patch, PatchParams};
 use crate::error::Error;
 
 // Selector label carried by every child so `.owns()` can label-filter.
-pub const CLUSTER_SELECTOR_LABEL: &str = "hydradb.helmforge.dev/cluster";
+pub const CLUSTER_SELECTOR_LABEL: &str = "hydradb.kubexa.tech/cluster";
 
 /// Child role for the shared operand `ConfigMap`.
 pub const ROLE_CONFIG: &str = "config";
@@ -186,7 +186,7 @@ mod tests {
 
     fn test_owner() -> GraphCluster {
         serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "default", "uid": "abc-123"},
             "spec": {
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn field_manager_is_exactly_the_pinned_string() {
-        assert_eq!(constants::FIELD_MANAGER, "hydradb.helmforge.dev/controller");
+        assert_eq!(constants::FIELD_MANAGER, "hydradb.kubexa.tech/controller");
         assert!(
             !constants::FIELD_MANAGER.contains("hydradb.hydradb."),
             "field manager must not be double-prefixed, got: {}",
@@ -224,7 +224,7 @@ mod tests {
         let owner_ref = owner_ref_for(&owner).expect("owner has name and uid");
         assert_eq!(owner_ref.controller, Some(true));
         assert_eq!(owner_ref.block_owner_deletion, Some(false));
-        assert_eq!(owner_ref.api_version, "hydradb.helmforge.dev/v1alpha1");
+        assert_eq!(owner_ref.api_version, "hydradb.kubexa.tech/v1alpha1");
         assert_eq!(owner_ref.kind, "GraphCluster");
         assert_eq!(owner_ref.name, "demo");
         assert_eq!(owner_ref.uid, "abc-123");
@@ -265,7 +265,7 @@ mod tests {
             ("app.kubernetes.io/component", "bolt"),
             ("app.kubernetes.io/managed-by", "hydradb-operator"),
             ("app.kubernetes.io/part-of", "hydradb"),
-            ("hydradb.helmforge.dev/cluster", "demo"),
+            ("hydradb.kubexa.tech/cluster", "demo"),
         ] {
             assert_eq!(
                 labels.get(key).map(String::as_str),

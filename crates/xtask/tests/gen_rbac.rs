@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use k8s_openapi::api::rbac::v1::ClusterRole;
 
-const EXPECTED_CRD_GROUP: &str = "hydradb.helmforge.dev";
+const EXPECTED_CRD_GROUP: &str = "hydradb.kubexa.tech";
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

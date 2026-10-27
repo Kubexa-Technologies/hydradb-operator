@@ -45,7 +45,7 @@ use crate::error::Error;
 
 /// Annotation stamped on the CR before it goes away, carrying the deletion
 /// reason and timestamp so an operator pruning stays auditable.
-pub const PRUNED_BY_ANNOTATION: &str = "hydradb.helmforge.dev/pruned-by";
+pub const PRUNED_BY_ANNOTATION: &str = "hydradb.kubexa.tech/pruned-by";
 
 /// The finalizer string every reconciler must use: the shared
 /// [`hydradb_operator_api::constants::FINALIZER`] constant, never a literal.
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn finalizer_name_is_exactly_the_shared_constant() {
         assert_eq!(finalizer_name(), constants::FINALIZER);
-        assert_eq!(finalizer_name(), "hydradb.helmforge.dev/finalizer");
+        assert_eq!(finalizer_name(), "hydradb.kubexa.tech/finalizer");
     }
 
     #[test]

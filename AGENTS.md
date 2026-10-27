@@ -24,13 +24,15 @@ Run via mise tasks:
 - `mise run e2e` — end-to-end suite (needs a cluster).
 - `cargo xtask gen-all` — regenerate all generated artifacts.
 
-## Three-CRD model
+## Five-CRD model
 
-API group `hydradb.helmforge.dev`, version `v1alpha1`. Three kinds only:
+API group `hydradb.kubexa.tech`, version `v1alpha1`. Five kinds:
 
 1. `GraphCluster` — owns the deployment lifecycle.
 2. `GraphNodePool` — scales worker pools.
 3. `GraphIndexer` — drives indexing.
+4. `GraphBackup` — scheduled or one-shot object-store copies.
+5. `GraphIngestSource` — scheduled or webhook-triggered ingestion runs.
 
 Do not add kinds without a plan change.
 

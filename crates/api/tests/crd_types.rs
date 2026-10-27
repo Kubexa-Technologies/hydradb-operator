@@ -17,7 +17,7 @@ use serde_json::json;
 
 fn minimal_cluster_value() -> serde_json::Value {
     json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphCluster",
         "metadata": { "name": "example", "namespace": "default" },
         "spec": {
@@ -94,7 +94,7 @@ fn graphcluster_missing_object_store_errors() {
 #[test]
 fn graphnodepool_cache_union_rejects_both_keys() {
     let value = json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphNodePool",
         "metadata": { "name": "pool-0", "namespace": "default" },
         "spec": {
@@ -119,7 +119,7 @@ fn graphnodepool_cache_union_rejects_both_keys() {
 #[test]
 fn graphnodepool_missing_cluster_ref_errors() {
     let value = json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphNodePool",
         "metadata": { "name": "pool-0", "namespace": "default" },
         "spec": {
@@ -137,7 +137,7 @@ fn graphnodepool_missing_cluster_ref_errors() {
 #[test]
 fn graphnodepool_persistent_volume_cache_round_trips() {
     let value = json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphNodePool",
         "metadata": { "name": "pool-0", "namespace": "default" },
         "spec": {
@@ -170,7 +170,7 @@ fn graphnodepool_persistent_volume_cache_round_trips() {
 #[test]
 fn graphindexer_defaults() {
     let value = json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphIndexer",
         "metadata": { "name": "example-indexer", "namespace": "default" },
         "spec": {
@@ -199,7 +199,7 @@ fn graphindexer_defaults() {
 #[test]
 fn graphindexer_unknown_build_mode_is_tolerated() {
     let value = json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphIndexer",
         "metadata": { "name": "example-indexer", "namespace": "default" },
         "spec": {

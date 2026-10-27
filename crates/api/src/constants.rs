@@ -4,13 +4,13 @@
 //! the controller reference these constants instead of re-typing strings.
 
 /// CRD API group for all HydraDB resources.
-pub const GROUP: &str = "hydradb.helmforge.dev";
+pub const GROUP: &str = "hydradb.kubexa.tech";
 /// Current (and only) API version.
 pub const VERSION: &str = "v1alpha1";
 /// Server-side apply field manager used by the controller.
-pub const FIELD_MANAGER: &str = "hydradb.helmforge.dev/controller";
+pub const FIELD_MANAGER: &str = "hydradb.kubexa.tech/controller";
 /// Finalizer stranded on managed objects until cleanup completes.
-pub const FINALIZER: &str = "hydradb.helmforge.dev/finalizer";
+pub const FINALIZER: &str = "hydradb.kubexa.tech/finalizer";
 
 /// Object-store bucket name (S3 `bucketName`).
 pub const AWS_BUCKET_NAME: &str = "AWS_BUCKET_NAME";

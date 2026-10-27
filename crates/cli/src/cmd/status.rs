@@ -371,14 +371,14 @@ mod tests {
     fn json_list_shape_matches_v1_list() {
         let items = vec![
             json!({
-                "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+                "apiVersion": "hydradb.kubexa.tech/v1alpha1",
                 "kind": "GraphCluster",
                 "metadata": {"name": "demo", "namespace": "demo"},
                 "spec": {},
                 "status": {"conditions": []},
             }),
             json!({
-                "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+                "apiVersion": "hydradb.kubexa.tech/v1alpha1",
                 "kind": "GraphIndexer",
                 "metadata": {"name": "demo", "namespace": "demo"},
                 "spec": {},
@@ -408,7 +408,7 @@ mod tests {
     #[test]
     fn yaml_renders_the_same_list_document() {
         let items = vec![json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "demo"},
             "status": {"conditions": []},
@@ -433,7 +433,7 @@ mod tests {
     #[test]
     fn name_mode_uses_lowercase_kind_slash_name() {
         let list = list_value(vec![json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphNodePool",
             "metadata": {"name": "workers", "namespace": "demo"},
         })]);

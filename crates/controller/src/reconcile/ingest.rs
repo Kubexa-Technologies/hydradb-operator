@@ -38,7 +38,7 @@ const OPERATOR_SERVICE_ACCOUNT: &str = "hydradb-operator";
 
 /// Label carrying the owning source name, so job lookups stay exact even when
 /// one source name is a prefix of another (`docs` vs `docs-ingest`).
-pub const SOURCE_LABEL: &str = "hydradb.helmforge.dev/source";
+pub const SOURCE_LABEL: &str = "hydradb.kubexa.tech/source";
 
 /// Labels stamped on every ingest job.
 fn ingest_labels(source: &GraphIngestSource, cluster: &GraphCluster) -> BTreeMap<String, String> {
@@ -563,7 +563,7 @@ mod tests {
 
     fn source() -> GraphIngestSource {
         serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphIngestSource",
             "metadata": {"name": "docs", "namespace": "graphs", "uid": "uid-3"},
             "spec": {
@@ -617,7 +617,7 @@ mod tests {
     fn concurrency_policy_maps_onto_the_cronjob_field() {
         let source = source();
         let cluster: GraphCluster = serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "graphs", "uid": "uid-1"},
             "spec": {

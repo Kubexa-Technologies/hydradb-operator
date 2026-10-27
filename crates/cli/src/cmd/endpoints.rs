@@ -159,7 +159,7 @@ mod tests {
 
     fn cluster_fixture() -> Value {
         json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "demo"},
             "spec": {},

@@ -12,7 +12,7 @@ metadata:
     {{- include "hydradb-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
-  - hydradb.helmforge.dev
+  - hydradb.kubexa.tech
   resources:
   - graphclusters
   - graphnodepools
@@ -26,7 +26,7 @@ rules:
   - update
   - patch
 - apiGroups:
-  - hydradb.helmforge.dev
+  - hydradb.kubexa.tech
   resources:
   - graphclusters/status
   - graphnodepools/status

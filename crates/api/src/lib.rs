@@ -1,6 +1,6 @@
 //! HydraDB operator API types.
 //!
-//! Shared CRD primitives for the three `hydradb.helmforge.dev` kinds
+//! Shared CRD primitives for the three `hydradb.kubexa.tech` kinds
 //! (`GraphCluster`, `GraphNodePool`, `GraphIndexer`). The per-kind specs live
 //! in [`crd`]; everything reusable across kinds lives in [`spec`].
 

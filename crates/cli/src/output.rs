@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn all_five_modes_render_the_same_fixture() {
         let fixture = json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphNodePool",
             "metadata": {
                 "name": "p",
@@ -641,11 +641,8 @@ mod tests {
 
     #[test]
     fn with_kind_fills_only_missing_fields() {
-        let filled = with_kind(json!({}), "hydradb.helmforge.dev/v1alpha1", "GraphCluster");
-        assert_eq!(
-            filled["apiVersion"],
-            json!("hydradb.helmforge.dev/v1alpha1")
-        );
+        let filled = with_kind(json!({}), "hydradb.kubexa.tech/v1alpha1", "GraphCluster");
+        assert_eq!(filled["apiVersion"], json!("hydradb.kubexa.tech/v1alpha1"));
         assert_eq!(filled["kind"], json!("GraphCluster"));
         let kept = with_kind(
             json!({"apiVersion": "kept", "kind": "Kept"}),

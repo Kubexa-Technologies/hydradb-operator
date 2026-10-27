@@ -2,7 +2,7 @@
 
 HydraDB Kubernetes operator (kube-rs) reconciling GraphCluster, GraphNodePool, and GraphIndexer resources
 
-The operator reconciles three CRDs in group `hydradb.helmforge.dev/v1alpha1`:
+The operator reconciles three CRDs in group `hydradb.kubexa.tech/v1alpha1`:
 `GraphCluster` (deployment lifecycle), `GraphNodePool` (worker scaling),
 `GraphIndexer` (indexing jobs). The controller builds every child object in
 Rust — it never shells out to `helm template` at runtime.

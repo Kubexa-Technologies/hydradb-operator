@@ -289,7 +289,7 @@ mod tests {
                 "list semantic must stay Any regardless of streaming gate"
             );
             assert_eq!(
-                owned_watcher_config("hydradb.helmforge.dev/cluster=x", &support).list_semantic,
+                owned_watcher_config("hydradb.kubexa.tech/cluster=x", &support).list_semantic,
                 watcher::ListSemantic::Any,
                 "owned watches must stay Any as well"
             );
@@ -310,10 +310,10 @@ mod tests {
 
     #[test]
     fn owned_watch_config_carries_label_selector() {
-        let config = owned_watcher_config("hydradb.helmforge.dev/cluster=demo", &streaming_on());
+        let config = owned_watcher_config("hydradb.kubexa.tech/cluster=demo", &streaming_on());
         assert_eq!(
             config.label_selector.as_deref(),
-            Some("hydradb.helmforge.dev/cluster=demo")
+            Some("hydradb.kubexa.tech/cluster=demo")
         );
         assert_eq!(watcher_config(&streaming_on()).label_selector, None);
     }

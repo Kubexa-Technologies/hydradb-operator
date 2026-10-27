@@ -745,7 +745,7 @@ mod tests {
 
     fn cluster() -> GraphCluster {
         serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "graphs", "uid": "uid-1"},
             "spec": {
@@ -765,7 +765,7 @@ mod tests {
 
     fn backup() -> GraphBackup {
         serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphBackup",
             "metadata": {"name": "nightly", "namespace": "graphs", "uid": "uid-2"},
             "spec": {

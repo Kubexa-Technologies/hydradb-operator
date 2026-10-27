@@ -2,9 +2,9 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: graphingestsources.hydradb.helmforge.dev
+  name: graphingestsources.hydradb.kubexa.tech
 spec:
-  group: hydradb.helmforge.dev
+  group: hydradb.kubexa.tech
   names:
     categories:
     - hydradb

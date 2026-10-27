@@ -5,7 +5,7 @@
 //! passes and 1 when any check fails (see [`exit_code_for`]).
 //!
 //! 1. `crds_installed` — the three CRDs exist at group
-//!    `hydradb.helmforge.dev`, version `v1alpha1`, and serve that version.
+//!    `hydradb.kubexa.tech`, version `v1alpha1`, and serve that version.
 //! 2. `operator_deployment_ready` — the `hydradb-operator` Deployment exists
 //!    and has available replicas.
 //! 3. `graphclusters_ready` — every `GraphCluster` in scope has `Ready=True`.
@@ -273,7 +273,7 @@ pub fn cluster_is_ready(cluster: &Value) -> bool {
 
 // --- Live checks (read-only: get/list only) ----------------------------------
 
-/// Check 1: the three CRDs exist and serve `hydradb.helmforge.dev/v1alpha1`.
+/// Check 1: the three CRDs exist and serve `hydradb.kubexa.tech/v1alpha1`.
 async fn check_crds(client: &Client) -> CheckResult {
     const NAME: &str = "crds_installed";
     let api = Api::<CustomResourceDefinition>::all(client.clone());

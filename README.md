@@ -9,7 +9,7 @@ Secrets you point it at.
 
 ## Custom resources
 
-API group `hydradb.helmforge.dev`, version `v1alpha1`, all namespaced:
+API group `hydradb.kubexa.tech`, version `v1alpha1`, all namespaced:
 
 | Kind | Short | Purpose |
 |------|-------|---------|
@@ -33,7 +33,7 @@ Then a minimal cluster — `image`, `graph` and `objectStore` are required; ther
 for any of them:
 
 ```yaml
-apiVersion: hydradb.helmforge.dev/v1alpha1
+apiVersion: hydradb.kubexa.tech/v1alpha1
 kind: GraphCluster
 metadata:
   name: example
@@ -53,7 +53,7 @@ spec:
       credentialsSecretRef:
         name: hydradb-s3
 ---
-apiVersion: hydradb.helmforge.dev/v1alpha1
+apiVersion: hydradb.kubexa.tech/v1alpha1
 kind: GraphNodePool
 metadata:
   name: example-nodes
@@ -66,7 +66,7 @@ spec:
     storage:
       emptyDir: {}
 ---
-apiVersion: hydradb.helmforge.dev/v1alpha1
+apiVersion: hydradb.kubexa.tech/v1alpha1
 kind: GraphIndexer
 metadata:
   name: example-indexer

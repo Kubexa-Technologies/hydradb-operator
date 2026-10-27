@@ -162,13 +162,13 @@ fn empty_pod_list() -> serde_json::Value {
 
 fn cluster_fixture(object_store: serde_json::Value) -> serde_json::Value {
     serde_json::json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphCluster",
         "metadata": {
             "name": "demo",
             "namespace": "default",
             "uid": "abc-123",
-            "finalizers": ["hydradb.helmforge.dev/finalizer"]
+            "finalizers": ["hydradb.kubexa.tech/finalizer"]
         },
         "spec": {
             "image": {"repository": "example.com/hydradb", "tag": "v0.1.0"},
@@ -181,13 +181,13 @@ fn cluster_fixture(object_store: serde_json::Value) -> serde_json::Value {
 
 fn pool_fixture(cluster_ref_name: &str) -> serde_json::Value {
     serde_json::json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphNodePool",
         "metadata": {
             "name": "demo-pool",
             "namespace": "default",
             "uid": "pool-uid-1",
-            "finalizers": ["hydradb.helmforge.dev/finalizer"]
+            "finalizers": ["hydradb.kubexa.tech/finalizer"]
         },
         "spec": {
             "clusterRef": {"name": cluster_ref_name},
@@ -199,13 +199,13 @@ fn pool_fixture(cluster_ref_name: &str) -> serde_json::Value {
 
 fn indexer_fixture(enabled: bool) -> serde_json::Value {
     serde_json::json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphIndexer",
         "metadata": {
             "name": "demo-indexer",
             "namespace": "default",
             "uid": "idx-uid-1",
-            "finalizers": ["hydradb.helmforge.dev/finalizer"]
+            "finalizers": ["hydradb.kubexa.tech/finalizer"]
         },
         "spec": {
             "clusterRef": {"name": "demo"},
@@ -256,15 +256,15 @@ fn cluster_happy_paths() -> Vec<(&'static str, &'static str)> {
         ("PATCH", "/api/v1/namespaces/default/secrets/demo-auth"),
         (
             "GET",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphclusters/demo",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphclusters/demo",
         ),
         (
             "GET",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphclusters/demo",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphclusters/demo",
         ),
         (
             "PATCH",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphclusters/demo/status",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphclusters/demo/status",
         ),
     ]
 }
@@ -535,7 +535,7 @@ async fn nodepool_reconcile_issues_the_exact_statefulset_pdb_and_status_requests
     let want: Vec<(String, String)> = [
         (
             "GET",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphclusters/demo",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphclusters/demo",
         ),
         (
             "PATCH",
@@ -549,19 +549,22 @@ async fn nodepool_reconcile_issues_the_exact_statefulset_pdb_and_status_requests
             "GET",
             "/apis/autoscaling/v2/namespaces/default/horizontalpodautoscalers/demo-pool-hpa",
         ),
-        ("GET", "/apis/apps/v1/namespaces/default/statefulsets/demo-pool"),
+        (
+            "GET",
+            "/apis/apps/v1/namespaces/default/statefulsets/demo-pool",
+        ),
         ("GET", "/api/v1/namespaces/default/pods"),
         (
             "GET",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphnodepools/demo-pool",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphnodepools/demo-pool",
         ),
         (
             "GET",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphnodepools/demo-pool",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphnodepools/demo-pool",
         ),
         (
             "PATCH",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphnodepools/demo-pool/status",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphnodepools/demo-pool/status",
         ),
     ]
     .into_iter()
@@ -701,7 +704,7 @@ async fn indexer_reconcile_issues_the_exact_deployment_pdb_and_status_requests()
     let want: Vec<(String, String)> = [
         (
             "GET",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphclusters/demo",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphclusters/demo",
         ),
         (
             "PATCH",
@@ -717,16 +720,16 @@ async fn indexer_reconcile_issues_the_exact_deployment_pdb_and_status_requests()
         ),
         (
             "GET",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphindexers/demo-indexer",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphindexers/demo-indexer",
         ),
         ("GET", "/api/v1/namespaces/default/pods"),
         (
             "GET",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphindexers/demo-indexer",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphindexers/demo-indexer",
         ),
         (
             "PATCH",
-            "/apis/hydradb.helmforge.dev/v1alpha1/namespaces/default/graphindexers/demo-indexer/status",
+            "/apis/hydradb.kubexa.tech/v1alpha1/namespaces/default/graphindexers/demo-indexer/status",
         ),
     ]
     .into_iter()
@@ -805,7 +808,7 @@ async fn finalizer_is_stamped_before_any_apply() {
     assert_eq!(log[0].method, "PATCH");
     assert!(log[0].path.ends_with("/graphclusters/demo"));
     assert!(
-        log[0].body.contains("hydradb.helmforge.dev/finalizer"),
+        log[0].body.contains("hydradb.kubexa.tech/finalizer"),
         "the stamp must name the shared finalizer, got: {}",
         log[0].body
     );

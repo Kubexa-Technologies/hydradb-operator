@@ -18,7 +18,7 @@ use serde_json::json;
 
 fn full_cluster_value() -> serde_json::Value {
     json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphCluster",
         "metadata": { "name": "full", "namespace": "default" },
         "spec": {
@@ -72,7 +72,7 @@ fn full_cluster_value() -> serde_json::Value {
 
 fn full_pool_value() -> serde_json::Value {
     json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphNodePool",
         "metadata": { "name": "pool-0", "namespace": "default" },
         "spec": {
@@ -119,7 +119,7 @@ fn full_pool_value() -> serde_json::Value {
 
 fn full_indexer_value() -> serde_json::Value {
     json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphIndexer",
         "metadata": { "name": "example-indexer", "namespace": "default" },
         "spec": {
@@ -525,7 +525,7 @@ fn extensible_enum_condition_reason_unknown_round_trip() {
 #[test]
 fn indexer_minimal_spec_carries_every_documented_default() {
     let value = json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphIndexer",
         "metadata": { "name": "example-indexer", "namespace": "default" },
         "spec": {
@@ -591,7 +591,7 @@ fn indexer_minimal_spec_carries_every_documented_default() {
 #[test]
 fn cluster_minimal_spec_carries_service_and_policy_defaults() {
     let value = json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphCluster",
         "metadata": { "name": "example", "namespace": "default" },
         "spec": {
@@ -619,7 +619,7 @@ fn cluster_minimal_spec_carries_service_and_policy_defaults() {
 #[test]
 fn nodepool_minimal_spec_leaves_optionals_absent() {
     let value = json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphNodePool",
         "metadata": { "name": "pool-0", "namespace": "default" },
         "spec": {

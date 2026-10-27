@@ -59,7 +59,7 @@ fn chart_rbac_grants_every_child_kind_the_controller_applies() {
 fn chart_rbac_names_every_api_group_it_uses() {
     let rbac = chart_rbac();
     for group in [
-        "hydradb.helmforge.dev",
+        "hydradb.kubexa.tech",
         "apps",
         "policy",
         "networking.k8s.io",

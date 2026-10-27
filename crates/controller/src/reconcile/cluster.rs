@@ -1656,7 +1656,7 @@ mod tests {
 
     fn cluster_fixture() -> GraphCluster {
         serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "default", "uid": "abc-123"},
             "spec": {
@@ -2231,7 +2231,7 @@ mod tests {
             .next()
             .unwrap_or(RECONCILE_SOURCE);
         assert!(
-            !production.contains("hydradb.helmforge.dev/finalizer"),
+            !production.contains("hydradb.kubexa.tech/finalizer"),
             "the finalizer name must come from constants::FINALIZER, never a literal"
         );
         assert_eq!(
@@ -2244,7 +2244,7 @@ mod tests {
     #[test]
     fn deletion_policy_defaults_to_retain_when_the_field_is_unset() {
         let cluster: GraphCluster = serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "default", "uid": "abc-123"},
             "spec": {

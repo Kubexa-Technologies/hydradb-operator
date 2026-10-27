@@ -3,7 +3,7 @@
 
 # GraphIndexer
 
-API group `hydradb.helmforge.dev`, version `v1alpha1`.
+API group `hydradb.kubexa.tech`, version `v1alpha1`.
 
 | Field | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |

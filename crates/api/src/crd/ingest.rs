@@ -110,7 +110,7 @@ pub enum ConcurrencyPolicy {
 #[serde(rename_all = "camelCase")]
 #[schemars(deny_unknown_fields)]
 #[kube(
-    group = "hydradb.helmforge.dev",
+    group = "hydradb.kubexa.tech",
     version = "v1alpha1",
     kind = "GraphIngestSource",
     namespaced,

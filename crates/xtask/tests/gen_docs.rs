@@ -11,7 +11,7 @@ use hydradb_operator_api::crd::{GraphCluster, GraphIndexer, GraphNodePool};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::CustomResourceExt;
 
-const EXPECTED_GROUP: &str = "hydradb.helmforge.dev";
+const EXPECTED_GROUP: &str = "hydradb.kubexa.tech";
 const EXPECTED_VERSION: &str = "v1alpha1";
 
 fn workspace_root() -> PathBuf {

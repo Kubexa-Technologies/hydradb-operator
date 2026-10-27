@@ -88,7 +88,7 @@ fn ctx_for(client: Client) -> Arc<Ctx> {
 
 fn cluster_fixture(name: &str, object_store: serde_json::Value) -> GraphCluster {
     serde_json::from_value(serde_json::json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphCluster",
         "metadata": {"name": name, "namespace": NAMESPACE},
         "spec": {
@@ -103,7 +103,7 @@ fn cluster_fixture(name: &str, object_store: serde_json::Value) -> GraphCluster 
 
 fn pool_fixture(name: &str, cluster_name: &str) -> GraphNodePool {
     serde_json::from_value(serde_json::json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphNodePool",
         "metadata": {"name": name, "namespace": NAMESPACE},
         "spec": {
@@ -117,7 +117,7 @@ fn pool_fixture(name: &str, cluster_name: &str) -> GraphNodePool {
 
 fn indexer_fixture(name: &str, cluster_name: &str) -> GraphIndexer {
     serde_json::from_value(serde_json::json!({
-        "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+        "apiVersion": "hydradb.kubexa.tech/v1alpha1",
         "kind": "GraphIndexer",
         "metadata": {"name": name, "namespace": NAMESPACE},
         "spec": {

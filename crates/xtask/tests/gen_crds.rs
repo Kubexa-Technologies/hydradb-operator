@@ -13,7 +13,7 @@ use hydradb_operator_api::crd::{
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::CustomResourceExt;
 
-const EXPECTED_GROUP: &str = "hydradb.helmforge.dev";
+const EXPECTED_GROUP: &str = "hydradb.kubexa.tech";
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

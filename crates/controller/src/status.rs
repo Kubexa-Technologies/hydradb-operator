@@ -25,7 +25,7 @@ use crate::reconcile::cluster::{BOLT_PORT, headless_service_name};
 /// to the live preserved value when no listed pod carries it. The constant
 /// exists so the convention is documented in exactly one place when the
 /// workload starts stamping it.
-pub const INDEX_GENERATION_LABEL: &str = "hydradb.helmforge.dev/index-generation";
+pub const INDEX_GENERATION_LABEL: &str = "hydradb.kubexa.tech/index-generation";
 
 /// Label selector scoping every child-state list to one cluster.
 ///
@@ -123,7 +123,7 @@ pub fn is_fully_ready(ready_replicas: i32, desired_replicas: i32) -> bool {
 
 /// Currently served index generation from the listed indexer pod labels.
 ///
-/// The lexicographically-maximum `hydradb.helmforge.dev/index-generation`
+/// The lexicographically-maximum `hydradb.kubexa.tech/index-generation`
 /// pod label wins; when no listed pod carries it the live value is preserved
 /// verbatim (never invented), and `None` stays `None`.
 #[must_use]
@@ -199,7 +199,7 @@ mod tests {
 
     fn cluster_fixture() -> GraphCluster {
         serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "default", "uid": "abc-123", "generation": 7},
             "spec": {
@@ -216,13 +216,10 @@ mod tests {
 
     #[test]
     fn selectors_are_scoped_by_the_cluster_label() {
-        assert_eq!(
-            cluster_selector("demo"),
-            "hydradb.helmforge.dev/cluster=demo"
-        );
+        assert_eq!(cluster_selector("demo"), "hydradb.kubexa.tech/cluster=demo");
         for selector in [node_pod_selector("demo"), indexer_pod_selector("demo")] {
             assert!(
-                selector.contains("hydradb.helmforge.dev/cluster=demo"),
+                selector.contains("hydradb.kubexa.tech/cluster=demo"),
                 "status list selector must carry the cluster label, got: {selector}"
             );
         }

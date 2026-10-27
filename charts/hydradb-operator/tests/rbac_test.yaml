@@ -58,7 +58,7 @@ tests:
           path: rules[0]
           value:
             apiGroups:
-              - hydradb.helmforge.dev
+              - hydradb.kubexa.tech
             resources:
               - graphclusters
               - graphnodepools

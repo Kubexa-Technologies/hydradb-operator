@@ -898,7 +898,7 @@ mod tests {
 
     fn cluster_fixture() -> GraphCluster {
         serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphCluster",
             "metadata": {"name": "demo", "namespace": "default", "uid": "abc-123"},
             "spec": {
@@ -915,7 +915,7 @@ mod tests {
 
     fn indexer_fixture(enabled: bool) -> GraphIndexer {
         serde_json::from_value(serde_json::json!({
-            "apiVersion": "hydradb.helmforge.dev/v1alpha1",
+            "apiVersion": "hydradb.kubexa.tech/v1alpha1",
             "kind": "GraphIndexer",
             "metadata": {"name": "demo-indexer", "namespace": "default", "uid": "idx-uid-1"},
             "spec": {
@@ -1198,7 +1198,7 @@ mod tests {
             .next()
             .unwrap_or(RECONCILE_SOURCE);
         assert!(
-            !production.contains("hydradb.helmforge.dev/finalizer"),
+            !production.contains("hydradb.kubexa.tech/finalizer"),
             "the finalizer name must come from constants::FINALIZER, never a literal"
         );
         assert_eq!(
