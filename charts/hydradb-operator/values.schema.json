@@ -24,7 +24,11 @@
         },
         "pullPolicy": {
           "type": "string",
-          "enum": ["IfNotPresent", "Always", "Never"]
+          "enum": [
+            "IfNotPresent",
+            "Always",
+            "Never"
+          ]
         },
         "pullSecrets": {
           "type": "array",
@@ -33,7 +37,13 @@
           }
         }
       },
-      "required": ["repository", "tag", "digest", "pullPolicy", "pullSecrets"]
+      "required": [
+        "repository",
+        "tag",
+        "digest",
+        "pullPolicy",
+        "pullSecrets"
+      ]
     },
     "replicaCount": {
       "type": "integer",
@@ -47,22 +57,39 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "cpu": { "type": "string" },
-            "memory": { "type": "string" }
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
           },
-          "required": ["cpu", "memory"]
+          "required": [
+            "cpu",
+            "memory"
+          ]
         },
         "limits": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "cpu": { "type": "string" },
-            "memory": { "type": "string" }
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
           },
-          "required": ["cpu", "memory"]
+          "required": [
+            "cpu",
+            "memory"
+          ]
         }
       },
-      "required": ["requests", "limits"]
+      "required": [
+        "requests",
+        "limits"
+      ]
     },
     "nodeSelector": {
       "type": "object"
@@ -78,7 +105,10 @@
     },
     "installScope": {
       "type": "string",
-      "enum": ["namespaced", "cluster"]
+      "enum": [
+        "namespaced",
+        "cluster"
+      ]
     },
     "monitoring": {
       "type": "object",
@@ -88,44 +118,88 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" }
+            "enabled": {
+              "type": "boolean"
+            }
           },
-          "required": ["enabled"]
+          "required": [
+            "enabled"
+          ]
         }
       },
-      "required": ["serviceMonitor"]
+      "required": [
+        "serviceMonitor"
+      ]
     },
     "crds": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "install": { "type": "boolean" }
+        "install": {
+          "type": "boolean"
+        }
       },
-      "required": ["install"]
+      "required": [
+        "install"
+      ]
     },
     "log": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "level": { "type": "string", "minLength": 1 }
+        "level": {
+          "type": "string",
+          "minLength": 1
+        }
       },
-      "required": ["level"]
+      "required": [
+        "level"
+      ]
     },
     "pdb": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       },
-      "required": ["enabled"]
+      "required": [
+        "enabled"
+      ]
     },
     "networkPolicy": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": {
+          "type": "boolean"
+        }
       },
-      "required": ["enabled"]
+      "required": [
+        "enabled"
+      ]
+    },
+    "webhook": {
+      "type": "object",
+      "description": "Ingest webhook receiver (push-triggered GraphIngestSource runs).",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Expose the receiver and its Service."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Receiver port."
+        }
+      },
+      "required": [
+        "enabled",
+        "port"
+      ]
     }
   },
   "required": [

@@ -52,7 +52,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hydradb_operator_api::constants;
-use hydradb_operator_api::crd::{DeletionPolicy, Endpoints, GraphCluster, GraphClusterStatus};
+use hydradb_operator_api::crd::{
+    DeletionPolicy, Endpoints, GraphCluster, GraphClusterStatus, IndexingStatus,
+};
 use hydradb_operator_api::spec::{PhaseLabel as _, S3};
 use hydradb_operator_api::validation::ValidationError;
 use k8s_openapi::ByteString;
@@ -326,6 +328,19 @@ pub fn routing_table_value(cluster_name: &str, namespace: &str, pod_names: &[Str
 }
 
 /// One TCP `ServicePort` with a numeric target port.
+/// Client-facing Bolt port from the spec (the operand always listens on
+/// [`BOLT_PORT`] inside the pod, so only the Service port follows the spec).
+#[must_use]
+fn spec_bolt_port(cluster: &GraphCluster) -> i32 {
+    i32::from(cluster.spec.service.bolt_port)
+}
+
+/// Client-facing HTTPS port from the spec.
+#[must_use]
+fn spec_https_port(cluster: &GraphCluster) -> i32 {
+    i32::from(cluster.spec.service.https_port)
+}
+
 fn tcp_port(name: &str, port: i32, target_port: i32) -> ServicePort {
     ServicePort {
         name: Some(name.to_owned()),
@@ -369,6 +384,8 @@ pub fn desired_headless_service(cluster: &GraphCluster) -> Result<Service, Error
             publish_not_ready_addresses: Some(true),
             selector: Some(node_pod_selector(&cluster_name)),
             ports: Some(vec![
+                // Headless peers address container ports directly: no
+                // client-facing port mapping applies here.
                 tcp_port("bolt", BOLT_PORT, BOLT_PORT),
                 tcp_port("https", HTTPS_TARGET_PORT, HTTPS_TARGET_PORT),
                 tcp_port("admin", METRICS_PORT, METRICS_PORT),
@@ -390,7 +407,7 @@ pub fn desired_bolt_service(cluster: &GraphCluster) -> Result<Service, Error> {
         )?,
         spec: Some(ServiceSpec {
             selector: Some(node_pod_selector(&cluster_name)),
-            ports: Some(vec![tcp_port("bolt", BOLT_PORT, BOLT_PORT)]),
+            ports: Some(vec![tcp_port("bolt", spec_bolt_port(cluster), BOLT_PORT)]),
             ..ServiceSpec::default()
         }),
         status: None,
@@ -408,7 +425,11 @@ pub fn desired_https_service(cluster: &GraphCluster) -> Result<Service, Error> {
         )?,
         spec: Some(ServiceSpec {
             selector: Some(node_pod_selector(&cluster_name)),
-            ports: Some(vec![tcp_port("https", HTTPS_PORT, HTTPS_TARGET_PORT)]),
+            ports: Some(vec![tcp_port(
+                "https",
+                spec_https_port(cluster),
+                HTTPS_TARGET_PORT,
+            )]),
             ..ServiceSpec::default()
         }),
         status: None,
@@ -657,7 +678,7 @@ pub fn config_data(
         .secret_key
         .clone()
         .unwrap_or_else(|| DEFAULT_AUTH_KEY.to_owned());
-    BTreeMap::from([
+    let mut data = BTreeMap::from([
         (
             constants::GRAPH_NAMESPACE.to_owned(),
             spec.graph.namespace.clone(),
@@ -732,7 +753,21 @@ pub fn config_data(
             constants::GRAPH_BOLT_NODE_ADDRESSES.to_owned(),
             bolt_node_addresses.to_owned(),
         ),
-    ])
+    ]);
+    // Typed tuning surface: only the leaves the user set become env vars, so
+    // an untouched `tuning` block changes nothing about the operand defaults.
+    for (key, value) in crate::children::tuning_env(&spec.tuning) {
+        data.insert(key, value);
+    }
+    // Nested subnamespaces are addressed by their own variable; the root stays
+    // in GRAPH_NAMESPACE so a tree of clusters can share one tenant.
+    if !spec.graph.subnamespaces.is_empty() {
+        data.insert(
+            constants::GRAPH_SUBNAMESPACE_PATH.to_owned(),
+            spec.graph.subnamespaces.join("."),
+        );
+    }
+    data
 }
 
 /// Build the desired shared `<cluster>-config` ConfigMap (pure: no API call).
@@ -889,6 +924,7 @@ fn stalled_status(
         endpoints: hydradb_operator_api::crd::Endpoints::default(),
         node_addresses: Vec::new(),
         observed_object_store,
+        indexing: IndexingStatus::default(),
     }
 }
 
@@ -914,6 +950,7 @@ fn ready_status(
         endpoints,
         node_addresses,
         observed_object_store: Some(observed_object_store),
+        indexing: IndexingStatus::default(),
     }
 }
 
@@ -939,6 +976,7 @@ async fn write_status_if_changed(
         endpoints: Endpoints::default(),
         node_addresses: Vec::new(),
         observed_object_store: None,
+        indexing: IndexingStatus::default(),
     });
     if !crate::status::cluster_status_needs_write(&live_status, desired) {
         return Ok(());
@@ -956,6 +994,7 @@ async fn write_status_if_changed(
                 "endpoints": desired.endpoints,
                 "nodeAddresses": desired.node_addresses,
                 "observedObjectStore": desired.observed_object_store,
+                "indexing": desired.indexing,
             }
         })),
     )
@@ -1106,6 +1145,52 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
             .map_err(Error::from_kube_error)?;
     }
 
+    // cert-manager Certificate (opt-in via `tls.issuerRef`): the operator owns
+    // the request, cert-manager owns the issuing, and the served Secret name is
+    // what the node pods already mount.
+    let cert_api: Api<DynamicObject> = Api::namespaced_with(
+        ctx.client.clone(),
+        &namespace,
+        &crate::children::certificate_api_resource(),
+    );
+    let cert_name = crate::apply::cluster_child_name(&name, crate::children::ROLE_CERTIFICATE);
+    if crate::children::certificate_enabled(&cluster) {
+        crate::apply::apply_child(&cert_api, &crate::children::desired_certificate(&cluster)?)
+            .await?;
+    } else if crate::children::get_opt_tolerant(&cert_api, &cert_name)
+        .await?
+        .is_some()
+    {
+        cert_api
+            .delete(&cert_name, &DeleteParams::default())
+            .await
+            .map_err(Error::from_kube_error)?;
+    }
+
+    // prometheus-operator PrometheusRule (opt-in): alerts on index staleness,
+    // generation failures, unready pools, backups and restores.
+    let rules_api: Api<DynamicObject> = Api::namespaced_with(
+        ctx.client.clone(),
+        &namespace,
+        &crate::children::prometheus_rule_api_resource(),
+    );
+    let rules_name = crate::children::prometheus_rule_name(&name);
+    if crate::children::prometheus_rule_enabled(&cluster) {
+        crate::apply::apply_child(
+            &rules_api,
+            &crate::children::desired_prometheus_rule(&cluster)?,
+        )
+        .await?;
+    } else if crate::children::get_opt_tolerant(&rules_api, &rules_name)
+        .await?
+        .is_some()
+    {
+        rules_api
+            .delete(&rules_name, &DeleteParams::default())
+            .await
+            .map_err(Error::from_kube_error)?;
+    }
+
     let secrets_api = Api::<Secret>::namespaced(ctx.client.clone(), &namespace);
     let existing_auth = secrets_api
         .get_opt(&crate::apply::cluster_child_name(&name, ROLE_AUTH))
@@ -1130,26 +1215,119 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
         }
     }
 
+    // One-shot restore: create the job, wait for it, publish `Restored`. Pools
+    // refuse to scale up until that condition is true, so no writer ever opens
+    // a half-copied store.
+    let restore_condition = reconcile_restore(&cluster, &ctx, &namespace).await?;
+
     let live = clusters.get(&name).await.map_err(Error::from_kube_error)?;
     let live_conditions_set = live
         .status
         .as_ref()
         .map(|status| status.conditions.clone())
         .unwrap_or_default();
-    write_status_if_changed(
-        &clusters,
-        &name,
-        &ready_status(
-            &live_conditions_set,
-            generation,
-            resolved.source.clone(),
-            crate::status::cluster_endpoints(&cluster),
-            crate::status::sorted_bolt_addresses(&live_pod_names, &name, &namespace),
-        ),
-    )
-    .await?;
+    let mut desired_status = ready_status(
+        &live_conditions_set,
+        generation,
+        resolved.source.clone(),
+        crate::status::cluster_endpoints(&cluster),
+        crate::status::sorted_bolt_addresses(&live_pod_names, &name, &namespace),
+    );
+    if let Some(condition) = restore_condition {
+        desired_status.conditions =
+            crate::conditions::upsert_condition_returning(desired_status.conditions, condition);
+    }
+    write_status_if_changed(&clusters, &name, &desired_status).await?;
+
+    // An in-flight restore keeps the requeue short so the condition flips as
+    // soon as the job finishes.
+    if cluster.spec.restore_from.is_some() && !restore_finished(&desired_status) {
+        return Ok(Action::requeue(Duration::from_secs(RESTORE_POLL_SECS)));
+    }
 
     Ok(Action::requeue(Duration::from_secs(SUCCESS_REQUEUE_SECS)))
+}
+
+/// Requeue cadence while a restore job is in flight.
+const RESTORE_POLL_SECS: u64 = 10;
+
+/// Whether the cluster reports a completed restore.
+#[must_use]
+pub fn restore_finished(status: &GraphClusterStatus) -> bool {
+    status
+        .conditions
+        .iter()
+        .any(|condition| condition.type_ == "Restored" && condition.status == "True")
+}
+
+/// Apply the restore job and derive its condition.
+///
+/// Returns `None` when the cluster declares no `restoreFrom`: nothing is
+/// created and no condition is published, so an ordinary cluster has no trace
+/// of the feature in its status.
+async fn reconcile_restore(
+    cluster: &GraphCluster,
+    ctx: &Ctx,
+    namespace: &str,
+) -> Result<Option<k8s_openapi::apimachinery::pkg::apis::meta::v1::Condition>, Error> {
+    if cluster.spec.restore_from.is_none() {
+        return Ok(None);
+    }
+    let jobs = Api::<k8s_openapi::api::batch::v1::Job>::namespaced(ctx.client.clone(), namespace);
+    let job_name = crate::reconcile::backup::restore_job_name(&cluster.name_any());
+    let existing = jobs
+        .get_opt(&job_name)
+        .await
+        .map_err(Error::from_kube_error)?;
+    let generation = cluster.meta().generation;
+
+    if existing.is_none() {
+        crate::apply::apply_child(
+            &jobs,
+            &crate::reconcile::backup::desired_restore_job(cluster)?,
+        )
+        .await?;
+        return Ok(Some(crate::conditions::new_condition(
+            "Restored",
+            "False",
+            hydradb_operator_api::spec::ConditionReason::Reconciling.label(),
+            "restore job started",
+            generation,
+        )));
+    }
+
+    let status = existing.as_ref().and_then(|job| job.status.as_ref());
+    if status
+        .and_then(|status| status.succeeded)
+        .is_some_and(|succeeded| succeeded > 0)
+    {
+        return Ok(Some(crate::conditions::new_condition(
+            "Restored",
+            "True",
+            hydradb_operator_api::spec::ConditionReason::Available.label(),
+            "restore completed",
+            generation,
+        )));
+    }
+    if status
+        .and_then(|status| status.failed)
+        .is_some_and(|failed| failed > 0)
+    {
+        return Ok(Some(crate::conditions::new_condition(
+            "Restored",
+            "False",
+            hydradb_operator_api::spec::ConditionReason::Failed.label(),
+            "restore job failed: inspect the job logs, then delete it to retry",
+            generation,
+        )));
+    }
+    Ok(Some(crate::conditions::new_condition(
+        "Restored",
+        "False",
+        hydradb_operator_api::spec::ConditionReason::Reconciling.label(),
+        "restore in progress",
+        generation,
+    )))
 }
 
 /// Reconcile one `GraphCluster` (controller entrypoint).

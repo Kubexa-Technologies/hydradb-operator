@@ -60,6 +60,7 @@ use std::time::{Duration, Instant};
 
 use hydradb_operator_api::constants;
 use hydradb_operator_api::crd::{DeletionPolicy, GraphCluster, GraphNodePool, GraphNodePoolStatus};
+use hydradb_operator_api::spec::NodeRole;
 use hydradb_operator_api::spec::{CacheStorage, Image};
 use k8s_openapi::api::apps::v1::{
     RollingUpdateStatefulSetStrategy, StatefulSet, StatefulSetSpec, StatefulSetUpdateStrategy,
@@ -109,6 +110,7 @@ const HTTPS_PORT: i32 = 8443;
 const ADMIN_PORT: i32 = 9090;
 
 /// `RUST_MIN_STACK` value (bytes): same floor as the indexer workload.
+const TLS_MOUNT_DIR: &str = "/var/run/secrets/hydradb-tls";
 const RUST_MIN_STACK_VALUE: &str = "33554432";
 
 /// UID/GID the operand runs as (never root).
@@ -201,6 +203,12 @@ pub fn auth_secret_key(cluster: &GraphCluster) -> String {
         .unwrap_or_else(|| DEFAULT_AUTH_KEY.to_owned())
 }
 
+/// Effective role of a pool: `spec.role`, defaulting to `All` when unset.
+#[must_use]
+pub fn role_of(pool: &GraphNodePool) -> NodeRole {
+    pool.spec.role.clone().unwrap_or(NodeRole::All)
+}
+
 /// Build the node's container env: `RUST_MIN_STACK`, then `spec.extra_env`
 /// LAST so a user override wins.
 ///
@@ -210,13 +218,56 @@ pub fn auth_secret_key(cluster: &GraphCluster) -> String {
 /// file named by `GRAPH_AUTH_TOKEN_FILE` — never as an env var (see the
 /// module docs).
 #[must_use]
-pub fn node_env(spec: &hydradb_operator_api::crd::GraphNodePoolSpec) -> Vec<EnvVar> {
+pub fn node_env(
+    spec: &hydradb_operator_api::crd::GraphNodePoolSpec,
+    role: &NodeRole,
+    cluster_extra_env: &[EnvVar],
+    spec_tls_enabled: bool,
+) -> Vec<EnvVar> {
     let mut env = vec![EnvVar {
         name: constants::RUST_MIN_STACK.to_owned(),
         value: Some(RUST_MIN_STACK_VALUE.to_owned()),
         value_from: None,
     }];
-    env.extend(spec.extra_env.iter().cloned());
+    // Role identity first: the operand uses it for placement and read routing.
+    for var in crate::children::role_env(role) {
+        crate::children::push_or_replace(&mut env, var);
+    }
+    if let Some(routing) = crate::children::read_routing_for(role) {
+        crate::children::push_or_replace(
+            &mut env,
+            EnvVar {
+                name: constants::GRAPH_READ_ROUTING.to_owned(),
+                value: Some(routing.to_owned()),
+                value_from: None,
+            },
+        );
+    }
+    // Cluster-wide defaults, then the pool's own variables last: a pool may
+    // override a cluster default but never an operator-owned variable
+    // (validation rejects those).
+    // Serving certificate paths, when the cluster terminates TLS.
+    if spec_tls_enabled {
+        for (key, file) in [
+            ("GRAPH_TLS_CERTIFICATE", "tls.crt"),
+            ("GRAPH_TLS_PRIVATE_KEY", "tls.key"),
+        ] {
+            crate::children::push_or_replace(
+                &mut env,
+                EnvVar {
+                    name: key.to_owned(),
+                    value: Some(format!("{TLS_MOUNT_DIR}/{file}")),
+                    value_from: None,
+                },
+            );
+        }
+    }
+    for var in cluster_extra_env {
+        crate::children::push_or_replace(&mut env, var.clone());
+    }
+    for var in &spec.extra_env {
+        crate::children::push_or_replace(&mut env, var.clone());
+    }
     env
 }
 
@@ -358,15 +409,38 @@ pub fn desired_statefulset(
         name: CONTAINER_NAME.to_owned(),
         image: Some(image),
         command: Some(vec![CONTAINER_NAME.to_owned()]),
-        env_from: Some(vec![EnvFromSource {
-            config_map_ref: Some(ConfigMapEnvSource {
-                name: cluster_child_name(&cluster_name, ROLE_CONFIG),
-                optional: None,
-            }),
-            prefix: None,
-            secret_ref: None,
-        }]),
-        env: Some(node_env(&pool.spec)),
+        env_from: Some({
+            let mut sources = vec![EnvFromSource {
+                config_map_ref: Some(ConfigMapEnvSource {
+                    name: cluster_child_name(&cluster_name, ROLE_CONFIG),
+                    optional: None,
+                }),
+                prefix: None,
+                secret_ref: None,
+            }];
+            // Explicit S3 backends carry their own credentials Secret; without
+            // this the operand cannot authenticate against its own store.
+            if let Some(credentials) = cluster
+                .spec
+                .object_store
+                .explicit
+                .as_ref()
+                .and_then(|explicit| explicit.credentials_secret_ref.as_ref())
+            {
+                sources.push(EnvFromSource {
+                    secret_ref: crate::children::secret_env_source(&credentials.name),
+                    prefix: None,
+                    config_map_ref: None,
+                });
+            }
+            sources
+        }),
+        env: Some(node_env(
+            &pool.spec,
+            &role_of(pool),
+            &cluster.spec.extra_env,
+            cluster.spec.tls.enabled,
+        )),
         ports: Some(vec![
             ContainerPort {
                 name: Some("bolt".to_owned()),
@@ -418,26 +492,39 @@ pub fn desired_statefulset(
             }),
             ..Default::default()
         }),
-        volume_mounts: Some(vec![
-            VolumeMount {
-                name: "cache".to_owned(),
-                mount_path: CACHE_MOUNT_PATH.to_owned(),
-                read_only: None,
-                ..Default::default()
-            },
-            VolumeMount {
-                name: "tmp".to_owned(),
-                mount_path: TMP_MOUNT_PATH.to_owned(),
-                read_only: None,
-                ..Default::default()
-            },
-            VolumeMount {
-                name: "auth".to_owned(),
-                mount_path: AUTH_MOUNT_PATH.to_owned(),
-                read_only: Some(true),
-                ..Default::default()
-            },
-        ]),
+        volume_mounts: Some({
+            let mut mounts = vec![
+                VolumeMount {
+                    name: "cache".to_owned(),
+                    mount_path: CACHE_MOUNT_PATH.to_owned(),
+                    read_only: None,
+                    ..Default::default()
+                },
+                VolumeMount {
+                    name: "tmp".to_owned(),
+                    mount_path: TMP_MOUNT_PATH.to_owned(),
+                    read_only: None,
+                    ..Default::default()
+                },
+                VolumeMount {
+                    name: "auth".to_owned(),
+                    mount_path: AUTH_MOUNT_PATH.to_owned(),
+                    read_only: Some(true),
+                    ..Default::default()
+                },
+            ];
+            // Serving certificate, mounted read-only only when TLS is on; a
+            // mount without its volume is rejected by the apiserver.
+            if cluster.spec.tls.enabled {
+                mounts.push(VolumeMount {
+                    name: "tls".to_owned(),
+                    mount_path: TLS_MOUNT_DIR.to_owned(),
+                    read_only: Some(true),
+                    ..Default::default()
+                });
+            }
+            mounts
+        }),
         ..Default::default()
     };
 
@@ -523,7 +610,18 @@ pub fn desired_statefulset(
             }),
             ..Default::default()
         }),
-        volumes: Some(volumes),
+        volumes: Some({
+            let mut all = volumes;
+            if cluster.spec.tls.enabled {
+                // Serving certificate, mounted read-only; the env vars
+                // GRAPH_TLS_CERTIFICATE/GRAPH_TLS_PRIVATE_KEY point into it.
+                all.push(crate::children::secret_volume(
+                    "tls",
+                    &crate::children::certificate_secret_name(cluster),
+                )?);
+            }
+            all
+        }),
         ..Default::default()
     };
 
@@ -536,7 +634,13 @@ pub fn desired_statefulset(
             ..ObjectMeta::default()
         },
         spec: Some(StatefulSetSpec {
-            replicas: Some(pool.spec.replicas),
+            // With autoscaling the HPA owns the count; re-asserting the spec value
+            // here would revert every scaling decision on the next reconcile.
+            replicas: if pool.spec.autoscaling.is_some() {
+                None
+            } else {
+                Some(pool.spec.replicas)
+            },
             selector: LabelSelector {
                 match_labels: Some(selector),
                 ..Default::default()
@@ -612,6 +716,7 @@ fn ready_status(
     current_replicas: i32,
     desired_replicas: i32,
     bolt_addresses: Vec<String>,
+    role: Option<NodeRole>,
 ) -> GraphNodePoolStatus {
     let mut conditions = live_conditions_set.to_vec();
     set_ready(
@@ -625,6 +730,7 @@ fn ready_status(
         ready_replicas,
         current_replicas,
         bolt_addresses,
+        role,
     }
 }
 
@@ -650,6 +756,7 @@ async fn write_status_if_changed(
         ready_replicas: 0,
         current_replicas: 0,
         bolt_addresses: Vec::new(),
+        role: None,
     });
     if !crate::status::pool_status_needs_write(&live_status, desired) {
         return Ok(());
@@ -702,12 +809,46 @@ async fn reconcile_inner(pool: Arc<GraphNodePool>, ctx: Arc<Ctx>) -> Result<Acti
             ))
         })?;
 
+    // A cluster mid-restore must not admit a writer: refuse to create or scale
+    // the StatefulSet until the cluster publishes `Restored=True`.
+    if cluster.spec.restore_from.is_some() {
+        let restored = cluster
+            .status
+            .as_ref()
+            .is_some_and(crate::reconcile::cluster::restore_finished);
+        if !restored {
+            let message = "waiting for the cluster restore to complete before admitting nodes";
+            write_restore_gate_status(&pools, &name, generation, &pool, message).await?;
+            return Ok(Action::requeue(Duration::from_secs(RESTORE_GATE_POLL_SECS)));
+        }
+    }
+
     let desired = desired_statefulset(&pool, &cluster)?;
     let statefulsets = Api::<StatefulSet>::namespaced(ctx.client.clone(), &namespace);
     apply_child(&statefulsets, &desired).await?;
 
     let pdbs = Api::<PodDisruptionBudget>::namespaced(ctx.client.clone(), &namespace);
     apply_child(&pdbs, &desired_pdb(&pool, &cluster)?).await?;
+
+    // Opt-in autoscaling: deleted again when the flag is removed so a stale
+    // HPA cannot keep fighting an explicitly-set replica count.
+    let hpa_api: Api<kube::core::DynamicObject> = Api::namespaced_with(
+        ctx.client.clone(),
+        &namespace,
+        &crate::children::hpa_api_resource(),
+    );
+    let hpa_id = crate::children::hpa_name(&name);
+    if crate::children::hpa_enabled(&pool) {
+        apply_child(&hpa_api, &crate::children::desired_hpa(&pool)?).await?;
+    } else if crate::children::get_opt_tolerant(&hpa_api, &hpa_id)
+        .await?
+        .is_some()
+    {
+        hpa_api
+            .delete(&hpa_id, &DeleteParams::default())
+            .await
+            .map_err(Error::from_kube_error)?;
+    }
 
     let (ready_replicas, current_replicas) = statefulsets
         .get_opt(&pool_child_name(&name))
@@ -752,11 +893,45 @@ async fn reconcile_inner(pool: Arc<GraphNodePool>, ctx: Arc<Ctx>) -> Result<Acti
             current_replicas,
             pool.spec.replicas,
             bolt_addresses,
+            Some(role_of(&pool)),
         ),
     )
     .await?;
 
     Ok(Action::requeue(Duration::from_secs(SUCCESS_REQUEUE_SECS)))
+}
+
+/// Requeue cadence while a pool is gated on the cluster restore.
+const RESTORE_GATE_POLL_SECS: u64 = 10;
+
+/// Report a pool as not-ready while the cluster restore is still running.
+async fn write_restore_gate_status(
+    api: &Api<GraphNodePool>,
+    name: &str,
+    generation: Option<i64>,
+    pool: &GraphNodePool,
+    message: &str,
+) -> Result<(), Error> {
+    let condition = crate::conditions::new_condition(
+        "Ready",
+        "False",
+        <hydradb_operator_api::spec::ConditionReason as hydradb_operator_api::spec::PhaseLabel>::label(
+            &hydradb_operator_api::spec::ConditionReason::Reconciling,
+        ),
+        message,
+        generation,
+    );
+    let patch = serde_json::json!({
+        "status": {
+            "conditions": [condition],
+            "observedGeneration": generation,
+            "role": role_of(pool),
+        }
+    });
+    api.patch_status(name, &PatchParams::default(), &Patch::Merge(&patch))
+        .await
+        .map_err(Error::from_kube_error)?;
+    Ok(())
 }
 
 /// Reconcile one `GraphNodePool` (controller entrypoint).
@@ -1410,6 +1585,7 @@ mod tests {
             3,
             pool.spec.replicas,
             vec!["pod-a".to_owned()],
+            Some(NodeRole::All),
         );
         let ready = status
             .conditions
@@ -1427,7 +1603,15 @@ mod tests {
     fn partially_ready_pool_reports_ready_false_while_generation_still_tracks() {
         let mut pool = pool_fixture();
         pool.metadata.generation = Some(11);
-        let status = ready_status(&[], Some(11), 2, 3, pool.spec.replicas, Vec::new());
+        let status = ready_status(
+            &[],
+            Some(11),
+            2,
+            3,
+            pool.spec.replicas,
+            Vec::new(),
+            Some(NodeRole::All),
+        );
         let ready = status
             .conditions
             .iter()
@@ -1471,7 +1655,7 @@ mod tests {
     }
 
     #[test]
-    fn extra_env_is_applied_last_so_a_user_override_wins() {
+    fn extra_env_replaces_in_place_instead_of_appending_a_duplicate() {
         use k8s_openapi::api::core::v1::EnvVar;
         let mut pool = pool_fixture();
         pool.spec.extra_env = vec![EnvVar {
@@ -1485,18 +1669,19 @@ mod tests {
             .env
             .as_ref()
             .expect("container carries env");
-        let last = env
+        let matches: Vec<&EnvVar> = env
             .iter()
-            .rposition(|var| var.name == constants::RUST_MIN_STACK)
-            .expect("override must be present");
+            .filter(|var| var.name == constants::RUST_MIN_STACK)
+            .collect();
         assert_eq!(
-            env[last].value.as_deref(),
-            Some("1"),
-            "the LAST duplicate env entry wins in Kubernetes"
+            matches.len(),
+            1,
+            "an override must replace the built-in entry, never duplicate it"
         );
-        assert!(
-            last > 0,
-            "user extra_env must come after the built-in entries"
+        assert_eq!(
+            matches[0].value.as_deref(),
+            Some("1"),
+            "the user value must win"
         );
     }
 

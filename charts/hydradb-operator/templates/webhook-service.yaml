@@ -1,0 +1,23 @@
+{{- if .Values.webhook.enabled }}
+# SPDX-License-Identifier: Apache-2.0
+# Ingress point for push-triggered ingests. Only rendered when
+# `webhook.enabled` is true; the receiver itself is disabled via
+# OPERATOR_WEBHOOK_ADDR otherwise, so there is never a listener without a
+# Service or a Service without a listener.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hydradb-operator.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "hydradb-operator.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hydradb-operator.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: webhook
+      port: {{ .Values.webhook.port }}
+      targetPort: webhook
+      protocol: TCP
+{{- end }}

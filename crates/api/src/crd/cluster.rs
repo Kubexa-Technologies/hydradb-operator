@@ -5,12 +5,13 @@
 //! knobs. Replica configuration lives in [`crate::crd::GraphNodePool`] and
 //! indexing in [`crate::crd::GraphIndexer`], never here.
 
+use k8s_openapi::api::core::v1::EnvVar;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Condition;
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::spec::{Image, ObjectStore};
+use crate::spec::{Image, IssuerRef, ObjectStore, PrometheusRuleSpec, S3, TuningSpec};
 
 /// Deletion policy for a `GraphCluster`.
 ///
@@ -32,8 +33,17 @@ pub enum DeletionPolicy {
 #[serde(rename_all = "camelCase")]
 #[schemars(deny_unknown_fields)]
 pub struct GraphIdentity {
-    /// HydraDB graph namespace (`GRAPH_NAMESPACE`).
+    /// Root tenant namespace (`GRAPH_NAMESPACE`).
     pub namespace: String,
+    /// Nested subnamespaces below the root, outermost first.
+    ///
+    /// The operand addresses a graph inside a namespace tree whose depth is at
+    /// most eight levels including the root, so at most seven entries are
+    /// allowed here. Each entry is a single component (no dots); the controller
+    /// joins the whole path for the node's `GRAPH_SUBNAMESPACE_PATH` env var and
+    /// keeps the root in `GRAPH_NAMESPACE`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subnamespaces: Vec<String>,
     /// HydraDB graph id (`GRAPH_ID`).
     pub id: String,
     /// HydraDB database name (`GRAPH_DATABASE`).
@@ -69,9 +79,17 @@ pub struct TlsSpec {
     /// Enable TLS on the public endpoints.
     #[serde(default)]
     pub enabled: bool,
-    /// Secret holding the serving certificate; empty means cert-manager.
+    /// Secret holding the serving certificate. Mutually exclusive with
+    /// `issuerRef`; at least one of the two is required when `enabled`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_name: Option<String>,
+    /// cert-manager issuer used to obtain the serving certificate.
+    ///
+    /// When set, the controller owns a `cert-manager.io/v1 Certificate` named
+    /// `<cluster>-tls` whose secret lands in `secretName`'s slot (that name, or
+    /// `<cluster>-tls` when `secretName` is absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer_ref: Option<IssuerRef>,
     /// Extra DNS names on the serving certificate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub additional_dns_names: Vec<String>,
@@ -211,6 +229,9 @@ pub struct MonitoringSpec {
     /// Prometheus `ServiceMonitor` settings.
     #[serde(default)]
     pub service_monitor: ServiceMonitorSpec,
+    /// Prometheus `PrometheusRule` settings (opt-in, off by default).
+    #[serde(default)]
+    pub prometheus_rule: PrometheusRuleSpec,
 }
 
 /// Advertised cluster endpoints observed by the controller.
@@ -227,6 +248,59 @@ pub struct Endpoints {
     /// Admin/metrics endpoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admin: Option<String>,
+}
+
+/// Source of a one-shot restore performed before the cluster starts serving.
+///
+/// The operator runs the restore job once, waits for it, and only then scales
+/// the node pools up. The job image must implement the documented backup
+/// contract (see `docs/backup.md`); the operator injects every `HYDRADB_BACKUP_*`
+/// and `AWS_*` variable itself.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct RestoreSource {
+    /// Backup location: bucket, endpoint, region and credentials.
+    pub store: S3,
+    /// Image running the restore job.
+    pub image: Image,
+    /// Verify the restored object set before the cluster starts.
+    #[serde(default = "default_true")]
+    pub verify: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Index-build progress observed from the indexer's metrics endpoint.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct IndexingStatus {
+    /// Generation label currently published by the indexer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<String>,
+    /// Monotonic count of published index generations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_generations: Option<u64>,
+    /// Incremental builds that declined and fell back to a full build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incremental_fallbacks: Option<u64>,
+    /// Generation build failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_failures: Option<u64>,
+    /// Seconds since `publishedGenerations` last advanced. This is the
+    /// operator's staleness signal: it grows only while no new generation
+    /// lands, so an alert on it catches a stalled indexer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_seconds: Option<u64>,
+    /// RFC 3339 timestamp of the last successful metrics scrape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at: Option<String>,
+    /// Whether the last scrape reached the indexer metrics endpoint.
+    #[serde(default)]
+    pub reachable: bool,
 }
 
 /// Top-level HydraDB cluster.
@@ -269,7 +343,24 @@ pub struct GraphClusterSpec {
     /// Operand runtime knobs.
     #[serde(default)]
     pub runtime: RuntimeSpec,
-    /// Monitoring integration (ServiceMonitor opt-in, off by default).
+    /// Typed tuning surface for the operand's optional limits.
+    ///
+    /// Preferred over `extraEnv`: every leaf is validated and only set leaves
+    /// produce an env var.
+    #[serde(default)]
+    pub tuning: TuningSpec,
+    /// Extra environment variables applied to every operand pod of the cluster.
+    ///
+    /// Pool- and indexer-level `extraEnv` are merged on top of these, so a
+    /// pool can override a cluster-wide default. Variables that the operator
+    /// itself owns (`GRAPH_NAMESPACE`, `GRAPH_ID`, ...) cannot be overridden:
+    /// those are rejected during validation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_env: Vec<EnvVar>,
+    /// One-shot restore performed before the cluster starts serving.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_from: Option<RestoreSource>,
+    /// Monitoring integration (ServiceMonitor/PrometheusRule opt-in).
     #[serde(default)]
     pub monitoring: MonitoringSpec,
 }
@@ -294,4 +385,7 @@ pub struct GraphClusterStatus {
     /// Resolved object-store description (bucket/claim).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_object_store: Option<String>,
+    /// Index-build progress observed from the indexer.
+    #[serde(default)]
+    pub indexing: IndexingStatus,
 }

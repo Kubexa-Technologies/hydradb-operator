@@ -354,6 +354,7 @@ mod tests {
     #[test]
     fn identical_status_needs_no_write_on_any_kind() {
         let cluster_status = GraphClusterStatus {
+            indexing: Default::default(),
             conditions: Vec::new(),
             observed_generation: Some(7),
             endpoints: cluster_endpoints(&cluster_fixture()),
@@ -380,6 +381,7 @@ mod tests {
         );
 
         let pool_status = GraphNodePoolStatus {
+            role: None,
             conditions: Vec::new(),
             observed_generation: Some(7),
             ready_replicas: 3,

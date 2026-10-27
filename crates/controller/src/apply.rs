@@ -141,6 +141,24 @@ pub fn child_object_meta(
     })
 }
 
+/// Pure builder for a child's `ObjectMeta` when the owner is not a cluster.
+///
+/// Backups and ingest sources own their own jobs, so they pass their own
+/// `OwnerReference` instead of a [`GraphCluster`] one.
+#[must_use]
+pub fn child_object_meta_for(
+    cluster_name: &str,
+    role: &str,
+    owner_reference: OwnerReference,
+) -> ObjectMeta {
+    ObjectMeta {
+        name: Some(cluster_child_name(cluster_name, role)),
+        labels: Some(standard_labels(cluster_name, role)),
+        owner_references: Some(vec![owner_reference]),
+        ..ObjectMeta::default()
+    }
+}
+
 /// Server-side-apply `obj` into the apiserver (create-or-patch in one
 /// call) with the pinned field manager and `force`.
 ///

@@ -357,6 +357,381 @@ impl PhaseLabel for PullPolicy {
     }
 }
 
+/// Reference to a cert-manager issuer.
+///
+/// Modelled locally rather than depending on `cert-manager`'s Go types: the
+/// controller emits the `Certificate` through a [`serde_json::Value`] body, so
+/// only the three fields the API server validates are carried here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct IssuerRef {
+    /// Name of the `Issuer`/`ClusterIssuer` (or external issuer) object.
+    pub name: String,
+    /// Kind of the referenced issuer: `Issuer` or `ClusterIssuer`.
+    #[serde(default = "default_issuer_kind")]
+    pub kind: String,
+    /// API group of the issuer. Empty means `cert-manager.io`.
+    #[serde(default = "default_issuer_group")]
+    pub group: String,
+}
+
+fn default_issuer_kind() -> String {
+    "ClusterIssuer".to_owned()
+}
+
+fn default_issuer_group() -> String {
+    "cert-manager.io".to_owned()
+}
+
+impl Default for IssuerRef {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            kind: default_issuer_kind(),
+            group: default_issuer_group(),
+        }
+    }
+}
+
+/// Role a `GraphNodePool` plays in the cluster.
+///
+/// The operand distinguishes a single admitted writer per `(scope, cell)` from
+/// any number of readers; `All` keeps the pre-role behaviour where every node
+/// may serve both. Decoding is `Unknown`-tolerant for forward compatibility.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NodeRole {
+    /// Every node may write and read (single-pool deployments).
+    All,
+    /// Candidate writer nodes; placement elects one admitted writer.
+    Writer,
+    /// Read-only nodes; they never contend for the writer lease.
+    Reader,
+    /// A role string this build does not recognise. Decode-compat only.
+    Unknown(String),
+}
+
+phase_serde!(NodeRole, "Graph node role. Closed enum.");
+
+impl PhaseLabel for NodeRole {
+    const ALL: &'static [Self] = &[Self::All, Self::Writer, Self::Reader];
+    fn label(&self) -> &str {
+        match self {
+            Self::All => "all",
+            Self::Writer => "writer",
+            Self::Reader => "reader",
+            Self::Unknown(raw) => raw,
+        }
+    }
+    fn unknown(raw: String) -> Self {
+        Self::Unknown(raw)
+    }
+}
+
+/// GraphBLAS matrix budget knobs (`tuning.graphblas`).
+///
+/// Absent fields emit no env var, so the operand's own default applies; this
+/// type never invents a value the operand did not document.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct GraphBlasTuning {
+    /// Byte ceiling for all compiled matrices.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_bytes: Option<u64>,
+    /// Compiled matrices held at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_matrices: Option<u32>,
+    /// Matrix adjacencies held at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_adjacencies: Option<u32>,
+    /// Byte ceiling for one adjacency.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_adjacency_bytes: Option<u64>,
+    /// Concurrent matrix compilations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_concurrent_compilations: Option<u32>,
+}
+
+/// Query-execution limit knobs (`tuning.query`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct QueryTuning {
+    /// Wall-clock ceiling for one query, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_runtime_ms: Option<u64>,
+    /// Default result page size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub default_page_size: Option<u32>,
+    /// Maximum live server-side cursors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_server_cursors: Option<u32>,
+    /// Byte ceiling per cursor buffer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_cursor_buffer_bytes: Option<u64>,
+    /// Cursor idle TTL in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub cursor_ttl_ms: Option<u64>,
+    /// Slow-query logging threshold in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub slow_query_ms: Option<u64>,
+    /// Concurrent metadata hydrations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_concurrent_hydrations: Option<u32>,
+    /// Bookmark wait ceiling in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_bookmark_wait_ms: Option<u64>,
+    /// Transaction retry ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub txn_max_retries: Option<u32>,
+}
+
+/// Bolt connection-management knobs (`tuning.connection`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct ConnectionTuning {
+    /// Maximum concurrent Bolt connections.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_connections: Option<u32>,
+    /// Idle timeout in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub idle_timeout_ms: Option<u64>,
+    /// Maximum connection age in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub max_age_ms: Option<u64>,
+    /// Authentication handshake timeout in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub authentication_timeout_ms: Option<u64>,
+    /// Graceful shutdown drain window in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub graceful_shutdown_ms: Option<u64>,
+}
+
+/// Storage and index-artifact knobs (`tuning.storage`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct StorageTuning {
+    /// Object-store cache chunk size in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1024))]
+    pub cache_part_bytes: Option<u64>,
+    /// Parallel L0 flush tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub l0_flush_parallelism: Option<u32>,
+    /// Target L0 SST size in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub l0_sst_size_bytes: Option<u64>,
+    /// Key batch size for maintenance compaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub maintenance_batch_keys: Option<u32>,
+    /// Key batch size for artifact garbage collection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub artifact_gc_batch_keys: Option<u32>,
+    /// Key batch size for artifact writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub artifact_write_batch_keys: Option<u32>,
+    /// WAL flush interval in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub wal_flush_interval_ms: Option<u64>,
+    /// Return hydration scratch memory to the OS after each hydration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim_memory_after_hydration: Option<bool>,
+}
+
+/// Query-engine selector knobs (`tuning.engine`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct EngineTuning {
+    /// OpenCypher engine selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cypher_engine: Option<String>,
+    /// Compiled-kernel selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiled_kernel: Option<String>,
+    /// Sparse-kernel selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sparse_kernel: Option<String>,
+    /// Emit matrix profiling telemetry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_matrix: Option<bool>,
+}
+
+/// Placement, writer-lease and read-routing knobs (`tuning.placement`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct PlacementTuning {
+    /// Placement heartbeat interval in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub heartbeat_interval_ms: Option<u64>,
+    /// Placement heartbeat expiry in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub heartbeat_timeout_ms: Option<u64>,
+    /// Durable writer-lease duration in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub writer_lease_ms: Option<u64>,
+    /// Concurrent write lanes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub write_lanes: Option<u32>,
+    /// Bolt read-routing policy selector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_routing: Option<String>,
+    /// Follower-reader manifest poll interval in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub reader_manifest_poll_interval_ms: Option<u64>,
+    /// Index discovery interval in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1))]
+    pub index_discovery_interval_ms: Option<u64>,
+}
+
+/// Typed tuning surface for the operand's non-defaultable limits.
+///
+/// Every group is optional and every leaf is optional: an unset leaf emits no
+/// env var at all, so the operand's documented default applies. This type is
+/// the typed replacement for the previously untyped `extraEnv` escape hatch.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct TuningSpec {
+    /// GraphBLAS matrix budgets.
+    #[serde(default)]
+    pub graphblas: GraphBlasTuning,
+    /// Query-execution limits.
+    #[serde(default)]
+    pub query: QueryTuning,
+    /// Bolt connection management.
+    #[serde(default)]
+    pub connection: ConnectionTuning,
+    /// Storage and index-artifact batching.
+    #[serde(default)]
+    pub storage: StorageTuning,
+    /// Query-engine selectors.
+    #[serde(default)]
+    pub engine: EngineTuning,
+    /// Placement, writer lease and read routing.
+    #[serde(default)]
+    pub placement: PlacementTuning,
+}
+
+/// One HPA scaling policy (a `Pods`/`Percent` step over a period).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct HpaScalingPolicy {
+    /// Policy type: `Pods` or `Percent`.
+    #[serde(rename = "type")]
+    pub policy_type: String,
+    /// Magnitude of the step.
+    #[schemars(range(min = 1))]
+    pub value: i32,
+    /// Window the step applies over, in seconds.
+    #[schemars(range(min = 1))]
+    pub period_seconds: i32,
+}
+
+/// Scale-up or scale-down rules for an HPA.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct HpaScalingRules {
+    /// Window during which recommendations are taken into account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 0))]
+    pub stabilization_window_seconds: Option<i32>,
+    /// How multiple policies combine: `Max`, `Min` or `Disabled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub select_policy: Option<String>,
+    /// The policies themselves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<HpaScalingPolicy>,
+}
+
+/// Scale behaviour for an HPA.
+///
+/// Modelled as real fields instead of a free-form object: a `serde_json::Value`
+/// here produces a CRD schema whose `behavior` has no `type`, which the
+/// apiserver rejects outright.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct HpaBehavior {
+    /// Scale-up rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale_up: Option<HpaScalingRules>,
+    /// Scale-down rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale_down: Option<HpaScalingRules>,
+}
+
+/// Horizontal pod autoscaling for a `GraphNodePool`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct AutoscalingSpec {
+    /// Lower replica bound.
+    #[schemars(range(min = 1))]
+    pub min_replicas: i32,
+    /// Upper replica bound.
+    #[schemars(range(min = 1))]
+    pub max_replicas: i32,
+    /// Target average CPU utilisation percentage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 100))]
+    pub target_cpu_utilization_percentage: Option<i32>,
+    /// Scale-up/scale-down behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behavior: Option<HpaBehavior>,
+}
+
+/// Prometheus alerting integration.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
+pub struct PrometheusRuleSpec {
+    /// Create a `PrometheusRule` with the operator's alert set.
+    /// Off by default: enabling it requires prometheus-operator CRDs.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Extra labels merged onto the `PrometheusRule` (e.g. `release`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub labels: std::collections::BTreeMap<String, String>,
+}
+
 /// Machine-readable reason attached to a status condition.
 ///
 /// Condition reasons are free-form on the wire; this enum pins the reasons

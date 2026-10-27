@@ -18,6 +18,10 @@ spec:
     - ports:
         - port: 8080
           protocol: TCP
+        {{- if .Values.webhook.enabled }}
+        - port: {{ .Values.webhook.port }}
+          protocol: TCP
+        {{- end }}
   egress:
     - to:
         - namespaceSelector: {}

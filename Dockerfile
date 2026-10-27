@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # HydraDB operator image: builds the `hydradb-operator` controller binary and
-# the `hydradb` CLI plugin from this repo, and ships both on a distroless base.
+# the `hydradb` CLI plugin from this repo, and ships both on a Chainguard Wolfi
+# base (glibc, digest-pinned, rebuilt daily upstream).
 #
 # Binaries built here (BOTH are this repo's own binaries and BOTH are built):
 #   - hydradb-operator  (crates/controller, package `hydradb-operator`)
@@ -65,10 +66,19 @@ FROM scratch AS bin
 COPY --from=builder /out/hydradb-operator /hydradb-operator
 COPY --from=builder /out/hydradb /hydradb
 
-# --- runtime: distroless, non-root, operator entrypoint ------------------------
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2 AS runtime
+# --- runtime: Chainguard Wolfi, non-root, operator entrypoint -----------------
+# Chainguard Wolfi base (glibc, no shell in the default profile beyond busybox,
+# rebuilt daily upstream) pinned by digest: `latest` is never shipped.
+FROM cgr.dev/chainguard/wolfi-base@sha256:0feab531471d2edfcca55f18883441cb7df598e724fa2dedf9985273f532eed7 AS runtime
+
+# CA roots for the object-store and Kubernetes API TLS paths, plus tzdata for
+# the log timestamps. Installed as a virtual package so the layer stays minimal.
+RUN apk add --no-cache --virtual .hydradb-runtime ca-certificates-bundle tzdata \
+    && update-ca-certificates
 # Explicit paths: a `bin` context missing either file is a hard build error.
 COPY --from=bin /hydradb-operator /usr/local/bin/hydradb-operator
 COPY --from=bin /hydradb /usr/local/bin/hydradb
+# Wolfi's `nonroot` account is 65532:65532, matching the chart's pod security
+# context and the Chainguard-provided nonroot account.
 USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/hydradb-operator"]

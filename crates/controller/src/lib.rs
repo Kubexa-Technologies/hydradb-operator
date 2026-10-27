@@ -5,6 +5,7 @@
 //! mock assertions and envtest integration) can drive them directly.
 
 pub mod apply;
+pub mod children;
 pub mod conditions;
 pub mod context;
 pub mod error;
@@ -14,3 +15,4 @@ pub mod reconcile;
 pub mod run;
 pub mod status;
 pub mod watcher;
+pub mod webhook;

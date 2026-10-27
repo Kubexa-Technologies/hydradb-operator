@@ -159,6 +159,16 @@ pub fn upsert_gate(
 /// standard conditions are always present; an existing `Stalled=True` is
 /// never clobbered here (clearing a stall is the blocker's job, via
 /// [`upsert_gate`]).
+/// [`upsert_condition`] in owned form, for callers that build the vector.
+#[must_use]
+pub fn upsert_condition_returning(
+    mut conditions: Vec<Condition>,
+    new: Condition,
+) -> Vec<Condition> {
+    upsert_condition(&mut conditions, new);
+    conditions
+}
+
 pub fn set_ready(conditions: &mut Vec<Condition>, ready: bool, observed_generation: Option<i64>) {
     if ready {
         upsert_condition(

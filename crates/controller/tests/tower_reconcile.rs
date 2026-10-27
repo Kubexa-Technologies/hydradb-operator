@@ -244,6 +244,14 @@ fn cluster_happy_paths() -> Vec<(&'static str, &'static str)> {
             "GET",
             "/apis/monitoring.coreos.com/v1/namespaces/default/servicemonitors/demo-servicemonitor",
         ),
+        (
+            "GET",
+            "/apis/cert-manager.io/v1/namespaces/default/certificates/demo-tls",
+        ),
+        (
+            "GET",
+            "/apis/monitoring.coreos.com/v1/namespaces/default/prometheusrules/demo-rules",
+        ),
         ("GET", "/api/v1/namespaces/default/secrets/demo-auth"),
         ("PATCH", "/api/v1/namespaces/default/secrets/demo-auth"),
         (
@@ -283,6 +291,9 @@ async fn cluster_reconcile_issues_the_exact_child_and_status_requests() {
                 }
                 if method == "GET"
                     && (path.ends_with("/servicemonitors/demo-servicemonitor")
+                        || path.ends_with("/certificates/demo-tls")
+                        || path.ends_with("/prometheusrules/demo-rules")
+                        || path.ends_with("/horizontalpodautoscalers/demo-pool-hpa")
                         || path.ends_with("/secrets/demo-auth"))
                 {
                     return not_found_response();
@@ -485,6 +496,9 @@ async fn nodepool_reconcile_issues_the_exact_statefulset_pdb_and_status_requests
                 if method == "GET" && path.ends_with("/graphnodepools/demo-pool") {
                     return object_response(&pool_value);
                 }
+                if method == "GET" && path.ends_with("/horizontalpodautoscalers/demo-pool-hpa") {
+                    return not_found_response();
+                }
                 if method == "GET" && path.ends_with("/statefulsets/demo-pool") {
                     return object_response(&serde_json::json!({
                         "apiVersion": "apps/v1",
@@ -530,6 +544,10 @@ async fn nodepool_reconcile_issues_the_exact_statefulset_pdb_and_status_requests
         (
             "PATCH",
             "/apis/policy/v1/namespaces/default/poddisruptionbudgets/demo-pool",
+        ),
+        (
+            "GET",
+            "/apis/autoscaling/v2/namespaces/default/horizontalpodautoscalers/demo-pool-hpa",
         ),
         ("GET", "/apis/apps/v1/namespaces/default/statefulsets/demo-pool"),
         ("GET", "/api/v1/namespaces/default/pods"),

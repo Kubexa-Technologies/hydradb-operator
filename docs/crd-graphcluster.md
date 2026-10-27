@@ -14,11 +14,36 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | spec.auth.secretKey | string | optional |  | Key inside the auth Secret holding the token. |
 | spec.auth.token | string | optional |  | Inline token (testing only; prefer a Secret reference). |
 | spec.deletionPolicy | string | optional | "Retain" | What happens to backing data on cluster deletion. |
+| spec.extraEnv | array | optional |  | Extra environment variables applied to every operand pod of the cluster.<br/><br/>Pool- and indexer-level `extraEnv` are merged on top of these, so a<br/>pool can override a cluster-wide default. Variables that the operator<br/>itself owns (`GRAPH_NAMESPACE`, `GRAPH_ID`, ...) cannot be overridden:<br/>those are rejected during validation. |
+| spec.extraEnv[].name | string | required |  | Name of the environment variable. May consist of any printable ASCII characters except '='. |
+| spec.extraEnv[].value | string | optional |  | Variable references $(VAR_NAME) are expanded using the previously defined environment variables in the container and any service environment variables. If a variable cannot be resolved, the reference in the input string will be unchanged. Double $$ are reduced to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e. "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)". Escaped references will never be expanded, regardless of whether the variable exists or not. Defaults to "". |
+| spec.extraEnv[].valueFrom | object | optional |  | Source for the environment variable's value. Cannot be used if value is not empty. |
+| spec.extraEnv[].valueFrom.configMapKeyRef | object | optional |  | Selects a key of a ConfigMap. |
+| spec.extraEnv[].valueFrom.configMapKeyRef.key | string | required |  | The key to select. |
+| spec.extraEnv[].valueFrom.configMapKeyRef.name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
+| spec.extraEnv[].valueFrom.configMapKeyRef.optional | boolean | optional |  | Specify whether the ConfigMap or its key must be defined |
+| spec.extraEnv[].valueFrom.fieldRef | object | optional |  | Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`, spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs. |
+| spec.extraEnv[].valueFrom.fieldRef.apiVersion | string | optional |  | Version of the schema the FieldPath is written in terms of, defaults to "v1". |
+| spec.extraEnv[].valueFrom.fieldRef.fieldPath | string | required |  | Path of the field to select in the specified API version. |
+| spec.extraEnv[].valueFrom.fileKeyRef | object | optional |  | FileKeyRef selects a key of the env file. Requires the EnvFiles feature gate to be enabled. |
+| spec.extraEnv[].valueFrom.fileKeyRef.key | string | required |  | The key within the env file. An invalid key will prevent the pod from starting. The keys defined within a source may consist of any printable ASCII characters except '='. During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters. |
+| spec.extraEnv[].valueFrom.fileKeyRef.optional | boolean | optional |  | Specify whether the file or its key must be defined. If the file or key does not exist, then the env var is not published. If optional is set to true and the specified key does not exist, the environment variable will not be set in the Pod's containers.<br/><br/>If optional is set to false and the specified key does not exist, an error will be returned during Pod creation. |
+| spec.extraEnv[].valueFrom.fileKeyRef.path | string | required |  | The path within the volume from which to select the file. Must be relative and may not contain the '..' path or start with '..'. |
+| spec.extraEnv[].valueFrom.fileKeyRef.volumeName | string | required |  | The name of the volume mount containing the env file. |
+| spec.extraEnv[].valueFrom.resourceFieldRef | object | optional |  | Selects a resource of the container: only resources limits and requests (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported. |
+| spec.extraEnv[].valueFrom.resourceFieldRef.containerName | string | optional |  | Container name: required for volumes, optional for env vars |
+| spec.extraEnv[].valueFrom.resourceFieldRef.divisor | integer or string | optional |  | Specifies the output format of the exposed resources, defaults to "1" |
+| spec.extraEnv[].valueFrom.resourceFieldRef.resource | string | required |  | Required: resource to select |
+| spec.extraEnv[].valueFrom.secretKeyRef | object | optional |  | Selects a key of a secret in the pod's namespace |
+| spec.extraEnv[].valueFrom.secretKeyRef.key | string | required |  | The key of the secret to select from.  Must be a valid secret key. |
+| spec.extraEnv[].valueFrom.secretKeyRef.name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
+| spec.extraEnv[].valueFrom.secretKeyRef.optional | boolean | optional |  | Specify whether the Secret or its key must be defined |
 | spec.graph | object | required |  | Graph identity served by this cluster. |
 | spec.graph.cellId | string | required |  | Primary cell served by this cluster (`GRAPH_CELL_ID`). |
 | spec.graph.database | string | required |  | HydraDB database name (`GRAPH_DATABASE`). |
 | spec.graph.id | string | required |  | HydraDB graph id (`GRAPH_ID`). |
-| spec.graph.namespace | string | required |  | HydraDB graph namespace (`GRAPH_NAMESPACE`). |
+| spec.graph.namespace | string | required |  | Root tenant namespace (`GRAPH_NAMESPACE`). |
+| spec.graph.subnamespaces | array | optional |  | Nested subnamespaces below the root, outermost first.<br/><br/>The operand addresses a graph inside a namespace tree whose depth is at<br/>most eight levels including the root, so at most seven entries are<br/>allowed here. Each entry is a single component (no dots); the controller<br/>joins the whole path for the node's `GRAPH_SUBNAMESPACE_PATH` env var and<br/>keeps the root in `GRAPH_NAMESPACE`. |
 | spec.image | object | required |  | Operand container image. |
 | spec.image.digest | string | optional |  | Pinned image digest (without the `sha256:` prefix handling by runtime). |
 | spec.image.pullPolicy | string | optional |  | Image pull policy. Closed enum. |
@@ -26,7 +51,10 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | spec.image.pullSecrets[].name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
 | spec.image.repository | string | required |  | Image repository (registry + path), e.g. `example.com/org/hydradb`. |
 | spec.image.tag | string | optional |  | Image tag. Mutually combinable with `digest`; never `:latest`. |
-| spec.monitoring | object | optional | {"serviceMonitor":{"enabled":false}} | Monitoring integration (ServiceMonitor opt-in, off by default). |
+| spec.monitoring | object | optional | {"prometheusRule":{"enabled":false},"serviceMonitor":{"enabled":false}} | Monitoring integration (ServiceMonitor/PrometheusRule opt-in). |
+| spec.monitoring.prometheusRule | object | optional | {"enabled":false} | Prometheus `PrometheusRule` settings (opt-in, off by default). |
+| spec.monitoring.prometheusRule.enabled | boolean | optional | false | Create a `PrometheusRule` with the operator's alert set.<br/>Off by default: enabling it requires prometheus-operator CRDs. |
+| spec.monitoring.prometheusRule.labels | object | optional |  | Extra labels merged onto the `PrometheusRule` (e.g. `release`). |
 | spec.monitoring.serviceMonitor | object | optional | {"enabled":false} | Prometheus `ServiceMonitor` settings. |
 | spec.monitoring.serviceMonitor.enabled | boolean | optional | false | Create a `ServiceMonitor` selecting the cluster metrics Services.<br/>Off by default: enabling it would force prometheus-operator CRDs<br/>to be installed (upstream parity). |
 | spec.objectStore | object | required |  | Backing object store (exactly one source; validated by todo 11). |
@@ -39,6 +67,22 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | spec.objectStore.explicit.region | string | optional |  | Region, e.g. `us-east-1`. |
 | spec.objectStore.objectBucketClaim | object | optional |  | Reference to an `ObjectBucketClaim` provisioning the bucket. |
 | spec.objectStore.objectBucketClaim.name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
+| spec.restoreFrom | object | optional |  | One-shot restore performed before the cluster starts serving. |
+| spec.restoreFrom.image | object | required |  | Image running the restore job. |
+| spec.restoreFrom.image.digest | string | optional |  | Pinned image digest (without the `sha256:` prefix handling by runtime). |
+| spec.restoreFrom.image.pullPolicy | string | optional |  | Image pull policy. Closed enum. |
+| spec.restoreFrom.image.pullSecrets | array | optional |  | Secrets used to pull the image. |
+| spec.restoreFrom.image.pullSecrets[].name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
+| spec.restoreFrom.image.repository | string | required |  | Image repository (registry + path), e.g. `example.com/org/hydradb`. |
+| spec.restoreFrom.image.tag | string | optional |  | Image tag. Mutually combinable with `digest`; never `:latest`. |
+| spec.restoreFrom.store | object | required |  | Backup location: bucket, endpoint, region and credentials. |
+| spec.restoreFrom.store.allowHttp | boolean | optional | false | Allow plain-HTTP endpoints (non-TLS, testing only). |
+| spec.restoreFrom.store.bucket | string | required |  | Bucket name. Required when `explicit` is selected. |
+| spec.restoreFrom.store.credentialsSecretRef | object | optional |  | Secret holding the object-store credentials. |
+| spec.restoreFrom.store.credentialsSecretRef.name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
+| spec.restoreFrom.store.endpoint | string | optional |  | Custom endpoint override. Empty/absent means the provider default. |
+| spec.restoreFrom.store.region | string | optional |  | Region, e.g. `us-east-1`. |
+| spec.restoreFrom.verify | boolean | optional | true | Verify the restored object set before the cluster starts. |
 | spec.runtime | object | optional | {"dataCacheMaxOpenFiles":512,"maxConcurrentQueries":256,"maxOpenScopes":8,"maxQueryScanEdges":1000000,"readerWalReplayConcurrency":16,"rustLog":"info,hydradb=info","slatedbCacheBytes":671088640} | Operand runtime knobs. |
 | spec.runtime.dataCacheMaxOpenFiles | integer | optional | 512 | Process-wide file handles limit for SlateDB's disk caches. |
 | spec.runtime.maxConcurrentQueries | integer | optional | 256 | Maximum concurrent queries served. |
@@ -54,7 +98,56 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | spec.tls | object | optional | {"enabled":false} | TLS configuration. |
 | spec.tls.additionalDnsNames | array | optional |  | Extra DNS names on the serving certificate. |
 | spec.tls.enabled | boolean | optional | false | Enable TLS on the public endpoints. |
-| spec.tls.secretName | string | optional |  | Secret holding the serving certificate; empty means cert-manager. |
+| spec.tls.issuerRef | object | optional |  | cert-manager issuer used to obtain the serving certificate.<br/><br/>When set, the controller owns a `cert-manager.io/v1 Certificate` named<br/>`<cluster>-tls` whose secret lands in `secretName`'s slot (that name, or<br/>`<cluster>-tls` when `secretName` is absent). |
+| spec.tls.issuerRef.group | string | optional | "cert-manager.io" | API group of the issuer. Empty means `cert-manager.io`. |
+| spec.tls.issuerRef.kind | string | optional | "ClusterIssuer" | Kind of the referenced issuer: `Issuer` or `ClusterIssuer`. |
+| spec.tls.issuerRef.name | string | required |  | Name of the `Issuer`/`ClusterIssuer` (or external issuer) object. |
+| spec.tls.secretName | string | optional |  | Secret holding the serving certificate. Mutually exclusive with<br/>`issuerRef`; at least one of the two is required when `enabled`. |
+| spec.tuning | object | optional | {"connection":{},"engine":{},"graphblas":{},"placement":{},"query":{},"storage":{}} | Typed tuning surface for the operand's optional limits.<br/><br/>Preferred over `extraEnv`: every leaf is validated and only set leaves<br/>produce an env var. |
+| spec.tuning.connection | object | optional | {} | Bolt connection management. |
+| spec.tuning.connection.authenticationTimeoutMs | integer | optional |  | Authentication handshake timeout in milliseconds. |
+| spec.tuning.connection.gracefulShutdownMs | integer | optional |  | Graceful shutdown drain window in milliseconds. |
+| spec.tuning.connection.idleTimeoutMs | integer | optional |  | Idle timeout in milliseconds. |
+| spec.tuning.connection.maxAgeMs | integer | optional |  | Maximum connection age in milliseconds. |
+| spec.tuning.connection.maxConnections | integer | optional |  | Maximum concurrent Bolt connections. |
+| spec.tuning.engine | object | optional | {} | Query-engine selectors. |
+| spec.tuning.engine.compiledKernel | string | optional |  | Compiled-kernel selector. |
+| spec.tuning.engine.cypherEngine | string | optional |  | OpenCypher engine selector. |
+| spec.tuning.engine.profileMatrix | boolean | optional |  | Emit matrix profiling telemetry. |
+| spec.tuning.engine.sparseKernel | string | optional |  | Sparse-kernel selector. |
+| spec.tuning.graphblas | object | optional | {} | GraphBLAS matrix budgets. |
+| spec.tuning.graphblas.maxAdjacencies | integer | optional |  | Matrix adjacencies held at once. |
+| spec.tuning.graphblas.maxAdjacencyBytes | integer | optional |  | Byte ceiling for one adjacency. |
+| spec.tuning.graphblas.maxBytes | integer | optional |  | Byte ceiling for all compiled matrices. |
+| spec.tuning.graphblas.maxConcurrentCompilations | integer | optional |  | Concurrent matrix compilations. |
+| spec.tuning.graphblas.maxMatrices | integer | optional |  | Compiled matrices held at once. |
+| spec.tuning.placement | object | optional | {} | Placement, writer lease and read routing. |
+| spec.tuning.placement.heartbeatIntervalMs | integer | optional |  | Placement heartbeat interval in milliseconds. |
+| spec.tuning.placement.heartbeatTimeoutMs | integer | optional |  | Placement heartbeat expiry in milliseconds. |
+| spec.tuning.placement.indexDiscoveryIntervalMs | integer | optional |  | Index discovery interval in milliseconds. |
+| spec.tuning.placement.readRouting | string | optional |  | Bolt read-routing policy selector. |
+| spec.tuning.placement.readerManifestPollIntervalMs | integer | optional |  | Follower-reader manifest poll interval in milliseconds. |
+| spec.tuning.placement.writeLanes | integer | optional |  | Concurrent write lanes. |
+| spec.tuning.placement.writerLeaseMs | integer | optional |  | Durable writer-lease duration in milliseconds. |
+| spec.tuning.query | object | optional | {} | Query-execution limits. |
+| spec.tuning.query.cursorTtlMs | integer | optional |  | Cursor idle TTL in milliseconds. |
+| spec.tuning.query.defaultPageSize | integer | optional |  | Default result page size. |
+| spec.tuning.query.maxBookmarkWaitMs | integer | optional |  | Bookmark wait ceiling in milliseconds. |
+| spec.tuning.query.maxConcurrentHydrations | integer | optional |  | Concurrent metadata hydrations. |
+| spec.tuning.query.maxCursorBufferBytes | integer | optional |  | Byte ceiling per cursor buffer. |
+| spec.tuning.query.maxRuntimeMs | integer | optional |  | Wall-clock ceiling for one query, in milliseconds. |
+| spec.tuning.query.maxServerCursors | integer | optional |  | Maximum live server-side cursors. |
+| spec.tuning.query.slowQueryMs | integer | optional |  | Slow-query logging threshold in milliseconds. |
+| spec.tuning.query.txnMaxRetries | integer | optional |  | Transaction retry ceiling. |
+| spec.tuning.storage | object | optional | {} | Storage and index-artifact batching. |
+| spec.tuning.storage.artifactGcBatchKeys | integer | optional |  | Key batch size for artifact garbage collection. |
+| spec.tuning.storage.artifactWriteBatchKeys | integer | optional |  | Key batch size for artifact writes. |
+| spec.tuning.storage.cachePartBytes | integer | optional |  | Object-store cache chunk size in bytes. |
+| spec.tuning.storage.l0FlushParallelism | integer | optional |  | Parallel L0 flush tasks. |
+| spec.tuning.storage.l0SstSizeBytes | integer | optional |  | Target L0 SST size in bytes. |
+| spec.tuning.storage.maintenanceBatchKeys | integer | optional |  | Key batch size for maintenance compaction. |
+| spec.tuning.storage.trimMemoryAfterHydration | boolean | optional |  | Return hydration scratch memory to the OS after each hydration. |
+| spec.tuning.storage.walFlushIntervalMs | integer | optional |  | WAL flush interval in milliseconds. |
 | status | object | optional |  | Observed state of a HydraDB cluster. |
 | status.conditions | array | optional |  | Standard Kubernetes conditions (`Ready`, etc.). |
 | status.conditions[].lastTransitionTime | string | required |  | lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable. |
@@ -67,6 +160,14 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | status.endpoints.admin | string | optional |  | Admin/metrics endpoint. |
 | status.endpoints.bolt | string | optional |  | Bolt endpoint (`host:port`). |
 | status.endpoints.https | string | optional |  | HTTPS endpoint. |
+| status.indexing | object | optional | {"reachable":false} | Index-build progress observed from the indexer. |
+| status.indexing.generation | string | optional |  | Generation label currently published by the indexer. |
+| status.indexing.generationFailures | integer | optional |  | Generation build failures. |
+| status.indexing.incrementalFallbacks | integer | optional |  | Incremental builds that declined and fell back to a full build. |
+| status.indexing.observedAt | string | optional |  | RFC 3339 timestamp of the last successful metrics scrape. |
+| status.indexing.publishedGenerations | integer | optional |  | Monotonic count of published index generations. |
+| status.indexing.reachable | boolean | optional | false | Whether the last scrape reached the indexer metrics endpoint. |
+| status.indexing.staleSeconds | integer | optional |  | Seconds since `publishedGenerations` last advanced. This is the<br/>operator's staleness signal: it grows only while no new generation<br/>lands, so an alert on it catches a stalled indexer. |
 | status.nodeAddresses | array | optional |  | Bolt addresses of every node. |
 | status.observedGeneration | integer | optional |  | Last reconciled generation. |
 | status.observedObjectStore | string | optional |  | Resolved object-store description (bucket/claim). |

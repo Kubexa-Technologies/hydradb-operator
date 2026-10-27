@@ -39,6 +39,11 @@ struct KindStats {
 #[derive(Debug, Default)]
 struct Registry {
     kinds: BTreeMap<&'static str, KindStats>,
+    /// Gauge families: metric name -> rendered label set -> value.
+    ///
+    /// Gauges are absolute observations (index staleness, last-backup
+    /// timestamp), so they are overwritten rather than accumulated.
+    gauges: BTreeMap<String, BTreeMap<String, f64>>,
 }
 
 fn registry() -> &'static Mutex<Registry> {
@@ -50,6 +55,32 @@ fn lock() -> std::sync::MutexGuard<'static, Registry> {
     registry()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Record an absolute gauge value.
+///
+/// `labels` is rendered in the order given; callers pass a stable order so two
+/// reconciles of the same object produce byte-identical exposition.
+pub fn set_gauge(name: &str, labels: &[(&str, &str)], value: f64) {
+    let mut reg = lock();
+    let rendered = labels
+        .iter()
+        .map(|(key, value)| format!("{key}=\"{}\"", escape_label(value)))
+        .collect::<Vec<_>>()
+        .join(",");
+    reg.gauges
+        .entry(name.to_owned())
+        .or_default()
+        .insert(rendered, value);
+}
+
+/// Drop every gauge whose family name starts with `prefix`.
+///
+/// Called when a child disappears so a stale sample cannot keep an alert firing
+/// after the object it described was deleted.
+pub fn clear_gauges_with_prefix(prefix: &str) {
+    let mut reg = lock();
+    reg.gauges.retain(|name, _| !name.starts_with(prefix));
 }
 
 // Called by the reconcilers landing in todos 18-24; until then only tests
@@ -204,6 +235,16 @@ pub fn render() -> String {
             escape_label(kind),
             stats.duration_count
         ));
+    }
+    for (family, samples) in &reg.gauges {
+        out.push_str(&format!("# TYPE {family} gauge\n"));
+        for (labels, value) in samples {
+            if labels.is_empty() {
+                out.push_str(&format!("{family} {value}\n"));
+            } else {
+                out.push_str(&format!("{family}{{{labels}}} {value}\n"));
+            }
+        }
     }
     out.push_str(
         "# HELP hydradb_operator_watcher_events_total Watcher events by kind and event.\n",

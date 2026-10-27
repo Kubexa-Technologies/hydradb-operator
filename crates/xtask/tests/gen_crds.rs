@@ -7,7 +7,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use hydradb_operator_api::crd::{GraphCluster, GraphIndexer, GraphNodePool};
+use hydradb_operator_api::crd::{
+    GraphBackup, GraphCluster, GraphIndexer, GraphIngestSource, GraphNodePool,
+};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::CustomResourceExt;
 
@@ -60,13 +62,13 @@ fn parse_crd(path: &std::path::Path) -> CustomResourceDefinition {
 }
 
 #[test]
-fn gen_crds_writes_three_files_to_both_directories() {
+fn gen_crds_writes_one_file_per_kind_to_both_directories() {
     run_gen_crds();
     for dir in crd_dirs() {
         assert_eq!(
             yaml_files(&dir).len(),
-            3,
-            "expected exactly 3 CRD files in {}",
+            5,
+            "expected exactly 5 CRD files in {}",
             dir.display()
         );
     }
@@ -104,11 +106,17 @@ fn every_generated_file_parses_as_a_crd_with_the_expected_group_and_kind() {
             kinds.insert(crd.spec.names.kind.clone());
         }
     }
-    let expected: BTreeSet<String> = ["GraphCluster", "GraphNodePool", "GraphIndexer"]
-        .into_iter()
-        .map(String::from)
-        .collect();
-    // Each directory contributes the same three kinds, so the union is exactly three.
+    let expected: BTreeSet<String> = [
+        "GraphCluster",
+        "GraphNodePool",
+        "GraphIndexer",
+        "GraphBackup",
+        "GraphIngestSource",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    // Each directory contributes the same kinds, so the union is exactly five.
     assert_eq!(kinds, expected);
 }
 
@@ -119,12 +127,14 @@ fn filename_comes_from_the_crd_plural_and_group() {
         GraphCluster::crd(),
         GraphNodePool::crd(),
         GraphIndexer::crd(),
+        GraphBackup::crd(),
+        GraphIngestSource::crd(),
     ];
     let expected: BTreeSet<String> = live
         .iter()
         .map(|crd| format!("{}.{}.yaml", crd.spec.names.plural, crd.spec.group))
         .collect();
-    assert_eq!(expected.len(), 3, "live CRDs must disagree on plural");
+    assert_eq!(expected.len(), 5, "live CRDs must disagree on plural");
     for dir in crd_dirs() {
         let actual: BTreeSet<String> = yaml_files(&dir)
             .iter()

@@ -9,7 +9,7 @@ use hydradb_operator_api::crd::{
     AuthSpec, DeletionPolicy, GraphCluster, GraphClusterSpec, GraphIdentity, GraphIndexer,
     GraphNodePool, MonitoringSpec, RuntimeSpec, ServiceSpec, TlsSpec,
 };
-use hydradb_operator_api::spec::{Image, ObjectStore, S3};
+use hydradb_operator_api::spec::{Image, ObjectStore, S3, TuningSpec};
 use kube::CustomResourceExt;
 
 fn valid_image() -> Image {
@@ -27,6 +27,7 @@ fn valid_spec() -> GraphClusterSpec {
         image: valid_image(),
         graph: GraphIdentity {
             namespace: "production".to_string(),
+            subnamespaces: Vec::new(),
             id: "default".to_string(),
             database: "default".to_string(),
             cell_id: "cell-0".to_string(),
@@ -46,6 +47,9 @@ fn valid_spec() -> GraphClusterSpec {
         deletion_policy: DeletionPolicy::Retain,
         service: ServiceSpec::default(),
         runtime: RuntimeSpec::default(),
+        tuning: TuningSpec::default(),
+        extra_env: Vec::new(),
+        restore_from: None,
         monitoring: MonitoringSpec::default(),
     }
 }
@@ -134,6 +138,7 @@ fn validate_rejects_additional_dns_names_when_tls_disabled() {
 fn validate_accepts_a_fully_specified_cluster() {
     let mut spec = valid_spec();
     spec.tls.enabled = true;
+    spec.tls.secret_name = Some("cluster-serving-cert".to_string());
     spec.tls.additional_dns_names = vec!["extra.example.com".to_string()];
     spec.runtime.max_open_scopes = 8;
     spec.runtime.data_cache_max_open_files = 16;

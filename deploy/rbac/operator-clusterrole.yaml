@@ -17,6 +17,8 @@ rules:
   - graphclusters
   - graphnodepools
   - graphindexers
+  - graphbackups
+  - graphingestsources
   verbs:
   - get
   - list
@@ -29,6 +31,8 @@ rules:
   - graphclusters/status
   - graphnodepools/status
   - graphindexers/status
+  - graphbackups/status
+  - graphingestsources/status
   verbs:
   - get
   - update
@@ -159,6 +163,66 @@ rules:
   - coordination.k8s.io
   resources:
   - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - batch
+  resources:
+  - cronjobs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - prometheusrules
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
   verbs:
   - get
   - list

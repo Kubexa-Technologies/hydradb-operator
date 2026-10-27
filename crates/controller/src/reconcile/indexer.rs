@@ -149,7 +149,10 @@ pub fn resolve_image(spec_image: Option<&Image>, cluster_image: &Image) -> Strin
 /// `envFrom` on the cluster's shared config ConfigMap (see
 /// [`desired_deployment`]).
 #[must_use]
-pub fn indexer_env(spec: &hydradb_operator_api::crd::GraphIndexerSpec) -> Vec<EnvVar> {
+pub fn indexer_env(
+    spec: &hydradb_operator_api::crd::GraphIndexerSpec,
+    cluster_extra_env: &[EnvVar],
+) -> Vec<EnvVar> {
     let build_mode = spec
         .build_mode
         .as_ref()
@@ -217,6 +220,9 @@ pub fn indexer_env(spec: &hydradb_operator_api::crd::GraphIndexerSpec) -> Vec<En
             value_from: None,
         },
     ];
+    for var in cluster_extra_env {
+        crate::children::push_or_replace(&mut env, var.clone());
+    }
     env.extend(spec.extra_env.iter().cloned());
     env
 }
@@ -314,7 +320,7 @@ pub fn desired_deployment(
             prefix: None,
             secret_ref: None,
         }]),
-        env: Some(indexer_env(&indexer.spec)),
+        env: Some(indexer_env(&indexer.spec, &cluster.spec.extra_env)),
         ports: Some(vec![ContainerPort {
             name: Some("admin".to_owned()),
             container_port: ADMIN_PORT,
@@ -1020,7 +1026,7 @@ mod tests {
     #[test]
     fn omitted_knobs_fall_back_to_the_documented_defaults() {
         let indexer = indexer_fixture(true);
-        let env = indexer_env(&indexer.spec);
+        let env = indexer_env(&indexer.spec, &[]);
         for (name, want) in [
             (GRAPH_INDEXER_INTERVAL_MS, "5000"),
             (GRAPH_INDEXER_DIRTY_POLL_INTERVAL_MS, "250"),

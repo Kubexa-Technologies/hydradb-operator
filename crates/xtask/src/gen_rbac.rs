@@ -10,8 +10,11 @@
 
 use std::path::{Path, PathBuf};
 
-use hydradb_operator_api::crd::{GraphCluster, GraphIndexer, GraphNodePool};
+use hydradb_operator_api::crd::{
+    GraphBackup, GraphCluster, GraphIndexer, GraphIngestSource, GraphNodePool,
+};
 use k8s_openapi::api::apps::v1::{Deployment, StatefulSet};
+use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::coordination::v1::Lease;
 use k8s_openapi::api::core::v1::{ConfigMap, Event, PersistentVolumeClaim, Pod, Secret, Service};
 use k8s_openapi::api::networking::v1::NetworkPolicy;
@@ -172,6 +175,8 @@ fn covered_kinds() -> anyhow::Result<Vec<Rule>> {
         GraphCluster::plural(&()).into_owned(),
         GraphNodePool::plural(&()).into_owned(),
         GraphIndexer::plural(&()).into_owned(),
+        GraphBackup::plural(&()).into_owned(),
+        GraphIngestSource::plural(&()).into_owned(),
     ];
     for plural in &crds {
         if plural.is_empty() {
@@ -234,11 +239,127 @@ fn covered_kinds() -> anyhow::Result<Vec<Rule>> {
             &full_lifecycle,
         )?,
         rule::<Lease>(vec![Lease::plural(&()).into_owned()], &full_lifecycle)?,
+        // Batch children: backups and ingest runs are Jobs/CronJobs owned by
+        // their CR, so the full lifecycle up to delete is required.
+        rule::<Job>(vec![Job::plural(&()).into_owned()], &full_lifecycle)?,
+        rule::<CronJob>(vec![CronJob::plural(&()).into_owned()], &full_lifecycle)?,
+        // Ecosystem integrations (opt-in children).
+        rule::<Certificate>(vec![Certificate::plural(&()).into_owned()], &full_lifecycle)?,
+        rule::<PrometheusRule>(
+            vec![PrometheusRule::plural(&()).into_owned()],
+            &full_lifecycle,
+        )?,
+        rule::<HorizontalPodAutoscaler>(
+            vec![HorizontalPodAutoscaler::plural(&()).into_owned()],
+            &full_lifecycle,
+        )?,
         rule::<ObjectBucketClaim>(
             vec![ObjectBucketClaim::plural(&()).into_owned()],
             &read_only,
         )?,
     ])
+}
+
+/// cert-manager `Certificate`: the operator requests serving certificates.
+struct Certificate {
+    metadata: ObjectMeta,
+}
+
+impl kube::Resource for Certificate {
+    type DynamicType = ();
+    type Scope = kube::core::NamespaceResourceScope;
+
+    fn meta(&self) -> &ObjectMeta {
+        &self.metadata
+    }
+
+    fn meta_mut(&mut self) -> &mut ObjectMeta {
+        &mut self.metadata
+    }
+
+    fn group(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("cert-manager.io")
+    }
+
+    fn version(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("v1")
+    }
+
+    fn kind(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("Certificate")
+    }
+
+    fn plural(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("certificates")
+    }
+}
+
+/// prometheus-operator `PrometheusRule`: the operator owns its alert set.
+struct PrometheusRule {
+    metadata: ObjectMeta,
+}
+
+impl kube::Resource for PrometheusRule {
+    type DynamicType = ();
+    type Scope = kube::core::NamespaceResourceScope;
+
+    fn meta(&self) -> &ObjectMeta {
+        &self.metadata
+    }
+
+    fn meta_mut(&mut self) -> &mut ObjectMeta {
+        &mut self.metadata
+    }
+
+    fn group(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("monitoring.coreos.com")
+    }
+
+    fn version(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("v1")
+    }
+
+    fn kind(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("PrometheusRule")
+    }
+
+    fn plural(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("prometheusrules")
+    }
+}
+
+/// `autoscaling/v2` `HorizontalPodAutoscaler`: opt-in pool autoscaling.
+struct HorizontalPodAutoscaler {
+    metadata: ObjectMeta,
+}
+
+impl kube::Resource for HorizontalPodAutoscaler {
+    type DynamicType = ();
+    type Scope = kube::core::NamespaceResourceScope;
+
+    fn meta(&self) -> &ObjectMeta {
+        &self.metadata
+    }
+
+    fn meta_mut(&mut self) -> &mut ObjectMeta {
+        &mut self.metadata
+    }
+
+    fn group(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("autoscaling")
+    }
+
+    fn version(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("v2")
+    }
+
+    fn kind(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("HorizontalPodAutoscaler")
+    }
+
+    fn plural(_: &()) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed("horizontalpodautoscalers")
+    }
 }
 
 /// Render the `ClusterRole` with a stable field order and exactly one

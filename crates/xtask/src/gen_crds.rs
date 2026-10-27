@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use hydradb_operator_api::crd::{GraphCluster, GraphIndexer, GraphNodePool};
+use hydradb_operator_api::crd::{
+    GraphBackup, GraphCluster, GraphIndexer, GraphIngestSource, GraphNodePool,
+};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::CustomResourceExt;
 
@@ -71,6 +73,8 @@ pub fn render_all() -> anyhow::Result<Vec<(String, String)>> {
         GraphCluster::crd(),
         GraphNodePool::crd(),
         GraphIndexer::crd(),
+        GraphBackup::crd(),
+        GraphIngestSource::crd(),
     ];
     let mut out = Vec::new();
     for crd in &crds {

@@ -123,8 +123,11 @@ fn validate_accept_reject_matrix() {
     }
 
     fn dns_with_tls(value: &mut serde_json::Value) {
-        value["spec"]["tls"] =
-            json!({ "enabled": true, "additionalDnsNames": ["extra.example.com"] });
+        value["spec"]["tls"] = json!({
+            "enabled": true,
+            "secretName": "cluster-serving-cert",
+            "additionalDnsNames": ["extra.example.com"]
+        });
     }
 
     let cases = [

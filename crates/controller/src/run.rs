@@ -20,6 +20,18 @@ use crate::{reconcile, watcher};
 /// Address the health/metrics server binds.
 pub const HEALTH_ADDR: &str = "0.0.0.0:8080";
 
+/// Environment variable selecting the webhook receiver address.
+///
+/// Unset, empty or `disabled` turns the receiver off, so a deployment that does
+/// not use push-triggered ingests exposes no extra listener at all.
+pub const WEBHOOK_ADDR_ENV: &str = "OPERATOR_WEBHOOK_ADDR";
+
+/// Default when `OPERATOR_WEBHOOK_ADDR` is unset: no listener at all.
+///
+/// An unset variable must never create an inbound HTTP surface, so the default
+/// is explicitly "off" and the chart opts in.
+pub const DEFAULT_WEBHOOK_ADDR: &str = "disabled";
+
 /// Run the operator until SIGTERM or SIGINT.
 ///
 /// # Errors
@@ -42,6 +54,9 @@ pub async fn run() -> Result<(), Error> {
     let cluster_handle = spawn_graph_cluster_controller(&ctx);
     let pool_handle = spawn_graph_nodepool_controller(&ctx);
     let indexer_handle = spawn_graph_indexer_controller(&ctx);
+    let backup_handle = spawn_graph_backup_controller(&ctx);
+    let ingest_handle = spawn_graph_ingest_controller(&ctx);
+    let webhook_handle = spawn_webhook_receiver(&ctx).await?;
 
     // The OTLP layer (if any) is attached in `main::init_tracing` while the
     // subscriber is built; nothing OTLP-related happens here.
@@ -56,6 +71,11 @@ pub async fn run() -> Result<(), Error> {
     cluster_handle.abort();
     pool_handle.abort();
     indexer_handle.abort();
+    backup_handle.abort();
+    ingest_handle.abort();
+    if let Some(handle) = webhook_handle {
+        handle.abort();
+    }
     tracing::info!("shutdown signal received, health server stopped");
     Ok(())
 }
@@ -116,6 +136,119 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
             });
         running.await;
     })
+}
+
+/// Spawn the `GraphBackup` controller.
+///
+/// Watches `GraphBackup` objects plus the `Job`/`CronJob` children it creates,
+/// so a run finishing wakes the owner immediately instead of waiting out the
+/// requeue interval.
+fn spawn_graph_backup_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
+    use futures::StreamExt as _;
+    use k8s_openapi::api::batch::v1::{CronJob, Job};
+    use kube::runtime::Controller;
+
+    use crate::apply::CLUSTER_SELECTOR_LABEL;
+
+    let backups = ctx.api::<hydradb_operator_api::crd::GraphBackup>();
+    let context = std::sync::Arc::new(ctx.clone());
+    tokio::spawn(async move {
+        let support = watcher::probe_watcher_support(&context.client).await;
+        let owned_selector = CLUSTER_SELECTOR_LABEL;
+        let running = Controller::new(backups, watcher::watcher_config(&support))
+            .owns(
+                context.api::<Job>(),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                context.api::<CronJob>(),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .with_config(watcher::controller_config())
+            .shutdown_on_signal()
+            .run(
+                reconcile::backup::reconcile,
+                reconcile::backup::error_policy,
+                context,
+            )
+            .for_each(|result| async move {
+                if let Err(error) = result {
+                    tracing::warn!(%error, "GraphBackup reconcile stream error");
+                }
+            });
+        running.await;
+    })
+}
+
+/// Spawn the `GraphIngestSource` controller.
+fn spawn_graph_ingest_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
+    use futures::StreamExt as _;
+    use k8s_openapi::api::batch::v1::{CronJob, Job};
+    use kube::runtime::Controller;
+
+    use crate::apply::CLUSTER_SELECTOR_LABEL;
+
+    let sources = ctx.api::<hydradb_operator_api::crd::GraphIngestSource>();
+    let context = std::sync::Arc::new(ctx.clone());
+    tokio::spawn(async move {
+        let support = watcher::probe_watcher_support(&context.client).await;
+        let owned_selector = CLUSTER_SELECTOR_LABEL;
+        let running = Controller::new(sources, watcher::watcher_config(&support))
+            .owns(
+                context.api::<Job>(),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                context.api::<CronJob>(),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .with_config(watcher::controller_config())
+            .shutdown_on_signal()
+            .run(
+                reconcile::ingest::reconcile,
+                reconcile::ingest::error_policy,
+                context,
+            )
+            .for_each(|result| async move {
+                if let Err(error) = result {
+                    tracing::warn!(%error, "GraphIngestSource reconcile stream error");
+                }
+            });
+        running.await;
+    })
+}
+
+/// Spawn the ingest webhook receiver, when an address is configured.
+///
+/// Returns `Ok(None)` when the receiver is disabled: no listener means no
+/// unauthenticated surface at all.
+///
+/// # Errors
+/// Returns [`Error::Server`] when the configured address cannot be bound.
+async fn spawn_webhook_receiver(ctx: &Ctx) -> Result<Option<tokio::task::JoinHandle<()>>, Error> {
+    let configured =
+        std::env::var(WEBHOOK_ADDR_ENV).unwrap_or_else(|_| DEFAULT_WEBHOOK_ADDR.to_owned());
+    if configured.is_empty() || configured == "disabled" {
+        tracing::info!("ingest webhook receiver disabled");
+        return Ok(None);
+    }
+    let listener = tokio::net::TcpListener::bind(&configured)
+        .await
+        .map_err(Error::Server)?;
+    tracing::info!(addr = %configured, "ingest webhook receiver listening");
+    let allowed_namespace = match ctx.scope {
+        crate::context::WatchScope::Namespaced => Some(ctx.namespace.clone()),
+        crate::context::WatchScope::Cluster => None,
+    };
+    let router = crate::webhook::router(crate::webhook::WebhookState {
+        client: ctx.client.clone(),
+        allowed_namespace,
+    });
+    Ok(Some(tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, router).await {
+            tracing::warn!(%error, "ingest webhook receiver stopped");
+        }
+    })))
 }
 
 /// Spawn the `GraphNodePool` controller (todo 20) as a background task.

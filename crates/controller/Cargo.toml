@@ -24,6 +24,9 @@ hydradb-operator-api = { path = "../api", version = "0.1.0" }
 kube.workspace = true
 k8s-openapi.workspace = true
 axum = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 tokio.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true

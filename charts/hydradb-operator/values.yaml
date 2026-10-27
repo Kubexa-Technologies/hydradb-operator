@@ -34,6 +34,13 @@ nodeSelector: {}
 tolerations: []
 # -- Affinity rules for operator pods.
 affinity: {}
+# -- Ingest webhook receiver: push-triggered runs for GraphIngestSource.
+# Disabled by default: no listener means no unauthenticated ingress surface.
+webhook:
+  # -- Expose the webhook receiver and its Service.
+  enabled: false
+  # -- Container/Service port the receiver listens on.
+  port: 8081
 # -- Operator watch scope: "namespaced" watches OPERATOR_NAMESPACE only, "cluster" watches all namespaces.
 installScope: namespaced
 # -- Monitoring integration settings.

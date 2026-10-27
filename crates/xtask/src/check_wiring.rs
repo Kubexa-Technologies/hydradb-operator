@@ -19,24 +19,6 @@ use kube::CustomResourceExt;
 /// Each entry needs its reason inline: the allowlist must never become a
 /// dumping ground for unexamined drift.
 const WIRING_ALLOWLIST: &[(&str, &str)] = &[
-    // Services are built from the BOLT_PORT/HTTPS_PORT/METRICS_PORT constants
-    // in reconcile/cluster.rs; the per-cluster port overrides are reserved
-    // surface and not honoured yet.
-    (
-        "boltPort",
-        "ServiceSpec override unused: Services use hardcoded port constants",
-    ),
-    // Same as boltPort: reserved override, Services use hardcoded constants.
-    (
-        "httpsPort",
-        "ServiceSpec override unused: Services use hardcoded port constants",
-    ),
-    // TlsSpec.enabled/secretName are referenced; only the cert-manager DNS SAN
-    // extension has no consumer yet.
-    (
-        "additionalDnsNames",
-        "TlsSpec extension with no consumer: serving cert path ignores DNS SANs",
-    ),
     // NodeServiceSpec overrides: the worker Service is derived from pod DNS,
     // never from these fields.
     (
@@ -48,17 +30,31 @@ const WIRING_ALLOWLIST: &[(&str, &str)] = &[
         "boltType",
         "NodeServiceSpec override unused: Service type comes from install scope",
     ),
-    // Inline S3 credentials are never mounted; the OBC path reads its own
-    // provisioned Secret instead.
-    (
-        "credentialsSecretRef",
-        "S3 inline credentials secret never mounted: only the OBC claim path is read",
-    ),
     // Only CacheStorage backend selection drives volumes; no cgroup budget is
     // derived from this field yet.
     (
         "memoryLimitBytes",
         "CacheSpec RAM budget not enforced: only the storage backend selects volumes",
+    ),
+    // spec.autoscaling.behavior is serialised wholesale into the HPA body
+    // (`serde_json::to_value(behavior)` in children.rs), so these leaf names
+    // never appear literally. The tool matches bare leaf names, hence four
+    // entries rather than six paths.
+    (
+        "scaleUp",
+        "serialised wholesale into the HPA spec; leaf never named",
+    ),
+    (
+        "scaleDown",
+        "serialised wholesale into the HPA spec; leaf never named",
+    ),
+    (
+        "selectPolicy",
+        "serialised wholesale into the HPA spec; leaf never named",
+    ),
+    (
+        "stabilizationWindowSeconds",
+        "serialised wholesale into the HPA spec; leaf never named",
     ),
     // spec.affinity is cloned wholesale into the StatefulSet/Deployment pod
     // specs (pool.spec.affinity.clone()), so these k8s-openapi leaf

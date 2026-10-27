@@ -40,6 +40,11 @@ spec:
             - name: healthz
               containerPort: 8080
               protocol: TCP
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+              protocol: TCP
+            {{- end }}
           env:
             - name: OPERATOR_NAMESPACE
               valueFrom:
@@ -47,6 +52,8 @@ spec:
                   fieldPath: metadata.namespace
             - name: OPERATOR_SCOPE
               value: {{ .Values.installScope | quote }}
+            - name: OPERATOR_WEBHOOK_ADDR
+              value: {{ if .Values.webhook.enabled }}{{ printf ":%.0f" .Values.webhook.port | quote }}{{ else }}"disabled"{{ end }}
             - name: RUST_LOG
               value: {{ .Values.log.level | quote }}
           livenessProbe:

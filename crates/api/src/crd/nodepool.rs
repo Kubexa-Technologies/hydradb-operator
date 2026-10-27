@@ -14,7 +14,11 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::spec::{CacheStorage, Image};
+use crate::spec::{AutoscalingSpec, CacheStorage, Image, NodeRole, strict_option};
+
+fn default_role() -> Option<NodeRole> {
+    Some(NodeRole::All)
+}
 
 /// On-disk cache configuration for pool nodes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -72,9 +76,19 @@ pub struct NodeServiceSpec {
 pub struct GraphNodePoolSpec {
     /// reference to the owning `GraphCluster` (`.name` only).
     pub cluster_ref: LocalObjectReference,
-    /// Desired worker replica count.
+    /// Role this pool plays in the cluster (default `all`).
+    ///
+    /// `writer` pools contend for the durable writer lease, `reader` pools
+    /// never do, and `all` keeps the pre-role behaviour.
+    #[serde(default = "default_role", deserialize_with = "strict_option")]
+    pub role: Option<NodeRole>,
+    /// Desired worker replica count. Ignored while `autoscaling` is set, which
+    /// then becomes the metric target instead of the replica override.
     #[schemars(range(min = 1))]
     pub replicas: i32,
+    /// Horizontal pod autoscaling for this pool (opt-in).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autoscaling: Option<AutoscalingSpec>,
     /// Image override; absent means the cluster's image.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<Image>,
@@ -144,4 +158,7 @@ pub struct GraphNodePoolStatus {
     /// Bolt addresses of every ready node.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bolt_addresses: Vec<String>,
+    /// Effective role of this pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<NodeRole>,
 }

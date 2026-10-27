@@ -105,6 +105,25 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[].namespaceSelector.matchLabels | object | optional |  | matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed. |
 | spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[].namespaces | array | optional |  | namespaces specifies a static list of namespace names that the term applies to. The term is applied to the union of the namespaces listed in this field and the ones selected by namespaceSelector. null or empty namespaces list and null namespaceSelector means "this pod's namespace". |
 | spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[].topologyKey | string | required |  | This pod should be co-located (affinity) or not co-located (anti-affinity) with the pods matching the labelSelector in the specified namespaces, where co-located is defined as running on a node whose value of the label with key topologyKey matches that of any node on which any of the selected pods is running. Empty topologyKey is not allowed. |
+| spec.autoscaling | object | optional |  | Horizontal pod autoscaling for this pool (opt-in). |
+| spec.autoscaling.behavior | object | optional |  | Scale-up/scale-down behaviour. |
+| spec.autoscaling.behavior.scaleDown | object | optional |  | Scale-down rules. |
+| spec.autoscaling.behavior.scaleDown.policies | array | optional |  | The policies themselves. |
+| spec.autoscaling.behavior.scaleDown.policies[].periodSeconds | integer | required |  | Window the step applies over, in seconds. |
+| spec.autoscaling.behavior.scaleDown.policies[].type | string | required |  | Policy type: `Pods` or `Percent`. |
+| spec.autoscaling.behavior.scaleDown.policies[].value | integer | required |  | Magnitude of the step. |
+| spec.autoscaling.behavior.scaleDown.selectPolicy | string | optional |  | How multiple policies combine: `Max`, `Min` or `Disabled`. |
+| spec.autoscaling.behavior.scaleDown.stabilizationWindowSeconds | integer | optional |  | Window during which recommendations are taken into account. |
+| spec.autoscaling.behavior.scaleUp | object | optional |  | Scale-up rules. |
+| spec.autoscaling.behavior.scaleUp.policies | array | optional |  | The policies themselves. |
+| spec.autoscaling.behavior.scaleUp.policies[].periodSeconds | integer | required |  | Window the step applies over, in seconds. |
+| spec.autoscaling.behavior.scaleUp.policies[].type | string | required |  | Policy type: `Pods` or `Percent`. |
+| spec.autoscaling.behavior.scaleUp.policies[].value | integer | required |  | Magnitude of the step. |
+| spec.autoscaling.behavior.scaleUp.selectPolicy | string | optional |  | How multiple policies combine: `Max`, `Min` or `Disabled`. |
+| spec.autoscaling.behavior.scaleUp.stabilizationWindowSeconds | integer | optional |  | Window during which recommendations are taken into account. |
+| spec.autoscaling.maxReplicas | integer | required |  | Upper replica bound. |
+| spec.autoscaling.minReplicas | integer | required |  | Lower replica bound. |
+| spec.autoscaling.targetCpuUtilizationPercentage | integer | optional |  | Target average CPU utilisation percentage. |
 | spec.cache | object | required |  | On-disk cache configuration. |
 | spec.cache.memoryLimitBytes | integer | optional |  | RAM budget for the on-disk cache in bytes. |
 | spec.cache.storage | object | required |  | Disposable on-disk object-store cache backend (exactly one variant). |
@@ -151,13 +170,14 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | spec.podAnnotations | object | optional |  | Annotations added to worker pods. |
 | spec.podLabels | object | optional |  | Labels added to worker pods. |
 | spec.priorityClassName | string | optional |  | Priority class for worker pods. |
-| spec.replicas | integer | required |  | Desired worker replica count. |
+| spec.replicas | integer | required |  | Desired worker replica count. Ignored while `autoscaling` is set, which<br/>then becomes the metric target instead of the replica override. |
 | spec.resources | object | optional |  | Compute resource requests and limits. |
 | spec.resources.claims | array | optional |  | Claims lists the names of resources, defined in spec.resourceClaims, that are used by this container.<br/><br/>This field depends on the DynamicResourceAllocation feature gate.<br/><br/>This field is immutable. It can only be set for containers. |
 | spec.resources.claims[].name | string | required |  | Name must match the name of one entry in pod.spec.resourceClaims of the Pod where this field is used. It makes that resource available inside a container. |
 | spec.resources.claims[].request | string | optional |  | Request is the name chosen for a request in the referenced claim. If empty, everything from the claim is made available, otherwise only the result of this request. |
 | spec.resources.limits | object | optional |  | Limits describes the maximum amount of compute resources allowed. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
 | spec.resources.requests | object | optional |  | Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/ |
+| spec.role | string | optional | "all" | Graph node role. Closed enum. |
 | spec.service | object | optional |  | Per-pool Service overrides. |
 | spec.service.advertisedBoltAddress | string | optional |  | Advertised bolt address override; empty means pod DNS. |
 | spec.service.boltType | string | optional |  | Bolt Service type override. |
@@ -199,3 +219,4 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | status.currentReplicas | integer | optional | 0 | Current worker replicas. |
 | status.observedGeneration | integer | optional |  | Last reconciled generation. |
 | status.readyReplicas | integer | optional | 0 | Ready worker replicas. |
+| status.role | string | optional |  | Graph node role. Closed enum. |

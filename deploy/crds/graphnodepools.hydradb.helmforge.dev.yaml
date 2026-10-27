@@ -871,6 +871,114 @@ spec:
                         type: array
                     type: object
                 type: object
+              autoscaling:
+                description: Horizontal pod autoscaling for this pool (opt-in).
+                nullable: true
+                properties:
+                  behavior:
+                    description: Scale-up/scale-down behaviour.
+                    nullable: true
+                    properties:
+                      scaleDown:
+                        description: Scale-down rules.
+                        nullable: true
+                        properties:
+                          policies:
+                            description: The policies themselves.
+                            items:
+                              description: One HPA scaling policy (a `Pods`/`Percent` step over a period).
+                              properties:
+                                periodSeconds:
+                                  description: Window the step applies over, in seconds.
+                                  format: int32
+                                  minimum: 1.0
+                                  type: integer
+                                type:
+                                  description: "Policy type: `Pods` or `Percent`."
+                                  type: string
+                                value:
+                                  description: Magnitude of the step.
+                                  format: int32
+                                  minimum: 1.0
+                                  type: integer
+                              required:
+                              - periodSeconds
+                              - type
+                              - value
+                              type: object
+                            type: array
+                          selectPolicy:
+                            description: "How multiple policies combine: `Max`, `Min` or `Disabled`."
+                            nullable: true
+                            type: string
+                          stabilizationWindowSeconds:
+                            description: Window during which recommendations are taken into account.
+                            format: int32
+                            minimum: 0.0
+                            nullable: true
+                            type: integer
+                        type: object
+                      scaleUp:
+                        description: Scale-up rules.
+                        nullable: true
+                        properties:
+                          policies:
+                            description: The policies themselves.
+                            items:
+                              description: One HPA scaling policy (a `Pods`/`Percent` step over a period).
+                              properties:
+                                periodSeconds:
+                                  description: Window the step applies over, in seconds.
+                                  format: int32
+                                  minimum: 1.0
+                                  type: integer
+                                type:
+                                  description: "Policy type: `Pods` or `Percent`."
+                                  type: string
+                                value:
+                                  description: Magnitude of the step.
+                                  format: int32
+                                  minimum: 1.0
+                                  type: integer
+                              required:
+                              - periodSeconds
+                              - type
+                              - value
+                              type: object
+                            type: array
+                          selectPolicy:
+                            description: "How multiple policies combine: `Max`, `Min` or `Disabled`."
+                            nullable: true
+                            type: string
+                          stabilizationWindowSeconds:
+                            description: Window during which recommendations are taken into account.
+                            format: int32
+                            minimum: 0.0
+                            nullable: true
+                            type: integer
+                        type: object
+                    type: object
+                  maxReplicas:
+                    description: Upper replica bound.
+                    format: int32
+                    minimum: 1.0
+                    type: integer
+                  minReplicas:
+                    description: Lower replica bound.
+                    format: int32
+                    minimum: 1.0
+                    type: integer
+                  targetCpuUtilizationPercentage:
+                    description: Target average CPU utilisation percentage.
+                    format: int32
+                    maximum: 100.0
+                    minimum: 1.0
+                    nullable: true
+                    type: integer
+                required:
+                - maxReplicas
+                - minReplicas
+                type: object
               cache:
                 description: On-disk cache configuration.
                 properties:
@@ -1102,7 +1210,9 @@ spec:
                 nullable: true
                 type: string
               replicas:
-                description: Desired worker replica count.
+                description: |-
+                  Desired worker replica count. Ignored while `autoscaling` is set, which
+                  then becomes the metric target instead of the replica override.
                 format: int32
                 minimum: 1.0
                 type: integer
@@ -1222,6 +1332,15 @@ spec:
                     description: "Requests describes the minimum amount of compute resources required. If Requests is omitted for a container, it defaults to Limits if that is explicitly specified, otherwise to an implementation-defined value. Requests cannot exceed Limits. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
                     type: object
                 type: object
+              role:
+                default: all
+                description: Graph node role. Closed enum.
+                enum:
+                - all
+                - writer
+                - reader
+                nullable: true
+                type: string
               service:
                 description: Per-pool Service overrides.
                 nullable: true
@@ -1489,6 +1608,14 @@ spec:
                 description: Ready worker replicas.
                 format: int32
                 type: integer
+              role:
+                description: Graph node role. Closed enum.
+                enum:
+                - all
+                - writer
+                - reader
+                nullable: true
+                type: string
             type: object
         required:
         - spec
