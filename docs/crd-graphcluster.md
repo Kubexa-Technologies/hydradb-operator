@@ -75,6 +75,7 @@ API group `hydradb.helmforge.dev`, version `v1alpha1`.
 | spec.restoreFrom.image.pullSecrets[].name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
 | spec.restoreFrom.image.repository | string | required |  | Image repository (registry + path), e.g. `example.com/org/hydradb`. |
 | spec.restoreFrom.image.tag | string | optional |  | Image tag. Mutually combinable with `digest`; never `:latest`. |
+| spec.restoreFrom.prefix | string | optional |  | Prefix inside the bucket holding the copy (the backup's `target.prefix`).<br/><br/>Absent means the bucket root, which only makes sense when the bucket<br/>holds exactly one backup. |
 | spec.restoreFrom.store | object | required |  | Backup location: bucket, endpoint, region and credentials. |
 | spec.restoreFrom.store.allowHttp | boolean | optional | false | Allow plain-HTTP endpoints (non-TLS, testing only). |
 | spec.restoreFrom.store.bucket | string | required |  | Bucket name. Required when `explicit` is selected. |

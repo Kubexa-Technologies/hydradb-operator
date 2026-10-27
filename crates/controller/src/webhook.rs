@@ -39,8 +39,10 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// Header carrying the lowercase hex HMAC-SHA256 of the request body.
 pub const SIGNATURE_HEADER: &str = "x-hydradb-signature";
-/// Header carrying an explicit revision to ingest.
-pub const REVISION_HEADER: &str = "x-hydradb-revision";
+/// Header carrying the unix timestamp the signature covers.
+pub const TIMESTAMP_HEADER: &str = "x-hydradb-timestamp";
+/// Maximum accepted clock skew, in seconds, between signer and receiver.
+pub const MAX_SKEW_SECS: u64 = 300;
 /// Default key inside the webhook Secret.
 pub const DEFAULT_WEBHOOK_KEY: &str = "token";
 /// Largest body the receiver accepts.
@@ -59,12 +61,13 @@ pub struct WebhookState {
     pub allowed_namespace: Option<String>,
 }
 
-/// Verify `body` against a `sha256=<hex>` signature using `secret`.
+/// Verify a signature over `timestamp.body`.
 ///
-/// Returns `false` for a malformed header, a wrong digest, or a missing prefix;
-/// the comparison itself is constant-time.
+/// Signing the timestamp (not just the body) is what makes a captured request
+/// non-replayable: the receiver rejects anything outside
+/// [`MAX_SKEW_SECS`]. The digest comparison itself is constant-time.
 #[must_use]
-pub fn verify_signature(secret: &[u8], body: &[u8], header: &str) -> bool {
+pub fn verify_signature(secret: &[u8], body: &[u8], timestamp: &str, header: &str) -> bool {
     let Some(hex) = header.strip_prefix("sha256=") else {
         return false;
     };
@@ -74,17 +77,33 @@ pub fn verify_signature(secret: &[u8], body: &[u8], header: &str) -> bool {
     let Ok(mut mac) = HmacSha256::new_from_slice(secret) else {
         return false;
     };
+    mac.update(timestamp.as_bytes());
+    mac.update(b".");
     mac.update(body);
     mac.verify_slice(&expected).is_ok()
 }
 
-/// Compute the `sha256=<hex>` signature for a body (used by tests and docs).
+/// Whether `timestamp` is within [`MAX_SKEW_SECS`] of now.
 #[must_use]
-pub fn sign(secret: &[u8], body: &[u8]) -> String {
+pub fn timestamp_is_fresh(timestamp: &str) -> bool {
+    let Ok(seconds) = timestamp.parse::<u64>() else {
+        return false;
+    };
+    let Ok(now) = u64::try_from(chrono::Utc::now().timestamp()) else {
+        return false;
+    };
+    now.abs_diff(seconds) <= MAX_SKEW_SECS
+}
+
+/// Compute the `sha256=<hex>` signature over `timestamp.body`.
+#[must_use]
+pub fn sign(secret: &[u8], body: &[u8], timestamp: &str) -> String {
     let mut mac = match HmacSha256::new_from_slice(secret) {
         Ok(mac) => mac,
         Err(_) => return String::new(),
     };
+    mac.update(timestamp.as_bytes());
+    mac.update(b".");
     mac.update(body);
     format!("sha256={}", hex_encode(&mac.finalize().into_bytes()))
 }
@@ -129,6 +148,9 @@ pub fn router(state: WebhookState) -> Router {
             "/webhooks/v1alpha1/ingest/{namespace}/{path}",
             post(handle_ingest),
         )
+        // Enforced by the extractor layer: the length check in the handler ran
+        // after axum had already buffered the body.
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }
 
@@ -174,6 +196,10 @@ async fn handle_ingest(
         .get(SIGNATURE_HEADER)
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
+    let timestamp = headers
+        .get(TIMESTAMP_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
     let key = match read_secret_key(
         &state.client,
         &namespace,
@@ -202,16 +228,18 @@ async fn handle_ingest(
         }
     };
 
-    if !verify_signature(&key, &body, signature) {
+    if !verify_signature(&key, &body, timestamp, signature) {
         warn!(%namespace, %path, "webhook signature rejected");
         return (StatusCode::UNAUTHORIZED, "invalid signature").into_response();
     }
+    if !timestamp_is_fresh(timestamp) {
+        warn!(%namespace, %path, "webhook timestamp outside the allowed skew");
+        return (StatusCode::UNAUTHORIZED, "stale request").into_response();
+    }
 
-    let revision = headers
-        .get(REVISION_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned)
-        .or_else(|| revision_from_body(&body));
+    // The revision comes from the SIGNED body only: a header would sit outside
+    // the MAC and let a replayed-but-valid request choose any revision.
+    let revision = revision_from_body(&body);
 
     let ctx = match crate::context::Ctx::new(
         state.client.clone(),
@@ -310,33 +338,54 @@ mod tests {
     #[test]
     fn signature_round_trips() {
         let body = br#"{"after":"abc123"}"#;
-        let signature = sign(SECRET, body);
+        let signature = sign(SECRET, body, "1700000000");
         assert!(signature.starts_with("sha256="));
-        assert!(verify_signature(SECRET, body, &signature));
+        assert!(verify_signature(SECRET, body, "1700000000", &signature));
+    }
+
+    #[test]
+    fn a_captured_signature_cannot_be_reused_with_another_timestamp() {
+        let body = b"payload";
+        let signature = sign(SECRET, body, "1700000000");
+        assert!(!verify_signature(SECRET, body, "1700000001", &signature));
+    }
+
+    #[test]
+    fn stale_timestamps_are_rejected() {
+        let now = chrono::Utc::now().timestamp().to_string();
+        assert!(timestamp_is_fresh(&now));
+        assert!(!timestamp_is_fresh("1000000000"));
+        assert!(!timestamp_is_fresh("not-a-number"));
     }
 
     #[test]
     fn rejects_wrong_secret_body_and_malformed_headers() {
         let body = b"payload";
-        let signature = sign(SECRET, body);
+        let signature = sign(SECRET, body, "1700000000");
         assert!(!verify_signature(
             b"another-secret-but-32-bytes-long!!",
             body,
+            "1700000000",
             &signature
         ));
-        assert!(!verify_signature(SECRET, b"other", &signature));
-        assert!(!verify_signature(SECRET, body, "sha256="));
-        assert!(!verify_signature(SECRET, body, "sha256=zzzz"));
-        assert!(!verify_signature(SECRET, body, "sha1=abcd"));
-        assert!(!verify_signature(SECRET, body, ""));
+        assert!(!verify_signature(
+            SECRET,
+            b"other",
+            "1700000000",
+            &signature
+        ));
+        assert!(!verify_signature(SECRET, body, "1700000000", "sha256="));
+        assert!(!verify_signature(SECRET, body, "1700000000", "sha256=zzzz"));
+        assert!(!verify_signature(SECRET, body, "1700000000", "sha1=abcd"));
+        assert!(!verify_signature(SECRET, body, "1700000000", ""));
     }
 
     #[test]
     fn accepts_uppercase_hex() {
         let body = b"payload";
-        let signature = sign(SECRET, body);
+        let signature = sign(SECRET, body, "1700000000");
         let upper = format!("sha256={}", signature[7..].to_uppercase());
-        assert!(verify_signature(SECRET, body, &upper));
+        assert!(verify_signature(SECRET, body, "1700000000", &upper));
     }
 
     #[test]

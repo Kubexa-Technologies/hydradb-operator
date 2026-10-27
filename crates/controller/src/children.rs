@@ -334,7 +334,11 @@ pub fn desired_prometheus_rule(cluster: &GraphCluster) -> Result<DynamicObject, 
         &prometheus_rule_api_resource(),
     );
     let mut labels = standard_labels(&name, ROLE_PROMETHEUSRULE);
-    labels.extend(cluster.spec.monitoring.prometheus_rule.labels.clone());
+    // User labels first, standard labels last: a user value must never break
+    // the ownership selectors `.owns()` filters on.
+    for (key, value) in &cluster.spec.monitoring.prometheus_rule.labels {
+        labels.entry(key.clone()).or_insert_with(|| value.clone());
+    }
     obj.metadata.labels = Some(labels);
     obj.metadata.owner_references = Some(vec![owner_ref_for(cluster)?]);
     obj.metadata.namespace = cluster.namespace();

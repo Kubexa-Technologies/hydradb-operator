@@ -95,6 +95,7 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
     use kube::runtime::Controller;
 
     use crate::apply::CLUSTER_SELECTOR_LABEL;
+    use crate::children::{CertificateObject, PrometheusRuleObject};
     use crate::reconcile::cluster::ServiceMonitorObject;
 
     let client = ctx.client.clone();
@@ -120,6 +121,14 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
             )
             .owns(
                 context.api::<ServiceMonitorObject>(),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                context.api::<CertificateObject>(),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                context.api::<PrometheusRuleObject>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .with_config(watcher::controller_config())
@@ -264,6 +273,7 @@ fn spawn_graph_nodepool_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
     use kube::runtime::Controller;
 
     use crate::apply::CLUSTER_SELECTOR_LABEL;
+    use crate::children::HpaObject;
 
     let client = ctx.client.clone();
     let pools = ctx.pools.clone();
@@ -280,6 +290,10 @@ fn spawn_graph_nodepool_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
             )
             .owns(
                 context.api::<PodDisruptionBudget>(),
+                watcher::owned_watcher_config(owned_selector, &support),
+            )
+            .owns(
+                context.api::<HpaObject>(),
                 watcher::owned_watcher_config(owned_selector, &support),
             )
             .with_config(watcher::controller_config())

@@ -162,6 +162,8 @@ pub const HYDRADB_BACKUP_TARGET_BUCKET: &str = "HYDRADB_BACKUP_TARGET_BUCKET";
 pub const HYDRADB_BACKUP_TARGET_PREFIX: &str = "HYDRADB_BACKUP_TARGET_PREFIX";
 /// Direction of the job: `backup` or `restore`.
 pub const HYDRADB_BACKUP_DIRECTION: &str = "HYDRADB_BACKUP_DIRECTION";
+/// How many backup copies to keep in the target prefix.
+pub const HYDRADB_BACKUP_RETENTION: &str = "HYDRADB_BACKUP_RETENTION";
 /// Whether the job must verify the copy before exiting.
 pub const HYDRADB_BACKUP_VERIFY: &str = "HYDRADB_BACKUP_VERIFY";
 

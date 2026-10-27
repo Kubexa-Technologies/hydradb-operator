@@ -383,6 +383,14 @@ spec:
                     required:
                     - repository
                     type: object
+                  prefix:
+                    description: |-
+                      Prefix inside the bucket holding the copy (the backup's `target.prefix`).
+                      
+                      Absent means the bucket root, which only makes sense when the bucket
+                      holds exactly one backup.
+                    nullable: true
+                    type: string
                   store:
                     description: "Backup location: bucket, endpoint, region and credentials."
                     properties:

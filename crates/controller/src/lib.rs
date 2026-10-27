@@ -13,6 +13,7 @@ pub mod finalizer;
 pub mod metrics;
 pub mod reconcile;
 pub mod run;
+pub mod scrape;
 pub mod status;
 pub mod watcher;
 pub mod webhook;

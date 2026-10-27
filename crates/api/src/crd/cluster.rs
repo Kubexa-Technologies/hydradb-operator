@@ -262,6 +262,12 @@ pub struct Endpoints {
 pub struct RestoreSource {
     /// Backup location: bucket, endpoint, region and credentials.
     pub store: S3,
+    /// Prefix inside the bucket holding the copy (the backup's `target.prefix`).
+    ///
+    /// Absent means the bucket root, which only makes sense when the bucket
+    /// holds exactly one backup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<String>,
     /// Image running the restore job.
     pub image: Image,
     /// Verify the restored object set before the cluster starts.

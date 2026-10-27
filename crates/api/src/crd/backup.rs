@@ -74,10 +74,12 @@ pub struct GraphBackupSpec {
     pub image: Image,
     /// Where the copy is written.
     pub target: BackupTarget,
-    /// Number of successful backup copies kept in the target prefix.
+    /// How many completed runs (and the copies they produced) to keep.
     ///
-    /// The operator prunes the oldest copies after a successful run; `1` keeps
-    /// only the newest. Must be at least 1.
+    /// The operator prunes its own finished `Job` records beyond this count and
+    /// passes the value to the copier as `HYDRADB_BACKUP_RETENTION`, because
+    /// only the copier can enumerate the object copies it wrote. Must be at
+    /// least 1.
     #[serde(default = "default_retention")]
     #[schemars(range(min = 1))]
     pub retention: i32,

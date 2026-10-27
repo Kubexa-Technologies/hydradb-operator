@@ -11,6 +11,7 @@
 //! (`HYDRADB_INGEST_*`, the Bolt URL and the graph scope) and requires only a
 //! zero exit status.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,6 +35,17 @@ const IDLE_REQUEUE_SECS: u64 = 120;
 
 /// ServiceAccount the operator itself runs as (chart default).
 const OPERATOR_SERVICE_ACCOUNT: &str = "hydradb-operator";
+
+/// Label carrying the owning source name, so job lookups stay exact even when
+/// one source name is a prefix of another (`docs` vs `docs-ingest`).
+pub const SOURCE_LABEL: &str = "hydradb.helmforge.dev/source";
+
+/// Labels stamped on every ingest job.
+fn ingest_labels(source: &GraphIngestSource, cluster: &GraphCluster) -> BTreeMap<String, String> {
+    let mut labels = crate::apply::standard_labels(&cluster.name_any(), "ingest");
+    labels.insert(SOURCE_LABEL.to_owned(), source.name_any());
+    labels
+}
 
 /// Name of the owned periodic `CronJob`.
 #[must_use]
@@ -210,6 +222,9 @@ fn job_spec(source: &GraphIngestSource, cluster: &GraphCluster, revision: &str) 
         template: pod_template(source, cluster, revision),
         backoff_limit: source.spec.backoff_limit,
         active_deadline_seconds: source.spec.active_deadline_seconds,
+        // Without a TTL every signed push leaves a Job and a completed pod
+        // behind forever.
+        ttl_seconds_after_finished: Some(3600),
         ..JobSpec::default()
     }
 }
@@ -247,7 +262,7 @@ pub fn desired_cron_job(
             failed_jobs_history_limit: source.spec.failed_jobs_history_limit,
             job_template: JobTemplateSpec {
                 metadata: Some(ObjectMeta {
-                    labels: Some(crate::apply::standard_labels(&cluster.name_any(), "ingest")),
+                    labels: Some(ingest_labels(source, cluster)),
                     ..ObjectMeta::default()
                 }),
                 spec: Some(job_spec(source, cluster, &revision)),

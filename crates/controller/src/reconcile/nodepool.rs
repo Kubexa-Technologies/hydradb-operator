@@ -823,6 +823,16 @@ async fn reconcile_inner(pool: Arc<GraphNodePool>, ctx: Arc<Ctx>) -> Result<Acti
         }
     }
 
+    if let Err(errors) = pool.spec.validate() {
+        let message = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("; ");
+        write_restore_gate_status(&pools, &name, generation, &pool, &message).await?;
+        return Ok(Action::requeue(Duration::from_secs(RESTORE_GATE_POLL_SECS)));
+    }
+
     let desired = desired_statefulset(&pool, &cluster)?;
     let statefulsets = Api::<StatefulSet>::namespaced(ctx.client.clone(), &namespace);
     apply_child(&statefulsets, &desired).await?;

@@ -199,6 +199,7 @@ fn restore_source_must_not_be_the_clusters_own_store() {
     let mut spec = cluster_spec();
     spec.restore_from = Some(RestoreSource {
         store: store(),
+        prefix: None,
         image: image(),
         verify: true,
     });
@@ -209,6 +210,7 @@ fn restore_source_must_not_be_the_clusters_own_store() {
     other.bucket = "backup-bucket".to_string();
     spec.restore_from = Some(RestoreSource {
         store: other,
+        prefix: Some("clusters/prod".to_owned()),
         image: image(),
         verify: true,
     });

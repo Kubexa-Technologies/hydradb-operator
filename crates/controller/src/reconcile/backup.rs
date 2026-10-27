@@ -77,6 +77,15 @@ fn backup_env(direction: &str, verify: bool) -> Vec<EnvVar> {
     ]
 }
 
+/// Retention env handed to the copier so it can prune old copies itself.
+fn retention_env(retention: i32) -> EnvVar {
+    EnvVar {
+        name: constants::HYDRADB_BACKUP_RETENTION.to_owned(),
+        value: Some(retention.to_string()),
+        ..EnvVar::default()
+    }
+}
+
 /// Env describing the source store of a backup (the cluster's own store).
 fn source_env(cluster: &GraphCluster) -> Vec<EnvVar> {
     let mut env = vec![EnvVar {
@@ -181,6 +190,7 @@ fn pod_template(backup: &GraphBackup, cluster: &GraphCluster, namespace: &str) -
     let mut env = backup_env("backup", backup.spec.verify);
     env.extend(source_env(cluster));
     env.extend(target_env(backup, namespace));
+    env.push(retention_env(backup.spec.retention));
     // Contract variables are operator-owned: a user value replaces in place
     // only where it is allowed, never duplicating a contract variable (a
     // duplicate would silently win by being last in the container env list).
@@ -453,7 +463,18 @@ pub async fn reconcile(backup: Arc<GraphBackup>, ctx: Arc<Ctx>) -> Result<Action
             }
         }
     };
-    write_status(&backups, &name, generation, ready, &message, Some(&target)).await?;
+    if ready == "True" {
+        let now = chrono::Utc::now();
+        crate::metrics::set_gauge(
+            "hydradb_operator_backup_last_success_timestamp_seconds",
+            &[("name", &name)],
+            now.timestamp() as f64,
+        );
+        write_backup_success(&backups, &name, generation, &now.to_rfc3339(), &child).await?;
+        prune_old_runs(&job_api, &namespace, &name, backup.spec.retention).await?;
+    } else {
+        write_status(&backups, &name, generation, ready, &message, Some(&target)).await?;
+    }
     Ok(Action::requeue(Duration::from_secs(if in_flight {
         IN_FLIGHT_REQUEUE_SECS
     } else {
@@ -520,6 +541,88 @@ async fn write_status(
     Ok(())
 }
 
+/// Delete finished runs beyond `retention`.
+///
+/// Only the operator's own `Job` records are pruned here; the object copies are
+/// the copier's to remove (it is told the retention count). Deleting a run
+/// record never touches data.
+async fn prune_old_runs(
+    api: &Api<Job>,
+    namespace: &str,
+    backup_name: &str,
+    retention: i32,
+) -> Result<(), Error> {
+    let selector = format!("{}={}", crate::apply::CLUSTER_SELECTOR_LABEL, backup_name);
+    let mut finished: Vec<Job> = api
+        .list(&ListParams::default().labels(&selector))
+        .await
+        .map_err(Error::from_kube_error)?
+        .items
+        .into_iter()
+        .filter(|job| {
+            job.status
+                .as_ref()
+                .is_some_and(|status| status.completion_time.is_some())
+        })
+        .collect();
+    if finished.len() <= usize::try_from(retention).unwrap_or(0) {
+        return Ok(());
+    }
+    finished.sort_by_key(|job| {
+        job.status
+            .as_ref()
+            .and_then(|status| status.completion_time.clone())
+    });
+    let excess = finished.len() - usize::try_from(retention).unwrap_or(0);
+    for job in finished.into_iter().take(excess) {
+        if let Some(name) = job.metadata.name {
+            let _ = api.delete(&name, &DeleteParams::background()).await;
+            let _ = namespace;
+        }
+    }
+    Ok(())
+}
+
+/// Record a successful run: timestamp, counter and the job that produced it.
+async fn write_backup_success(
+    api: &Api<GraphBackup>,
+    name: &str,
+    generation: Option<i64>,
+    finished_at: &str,
+    job: &str,
+) -> Result<(), Error> {
+    let live = api.get_opt(name).await.map_err(Error::from_kube_error)?;
+    let live_status = live
+        .as_ref()
+        .and_then(|object| object.status.clone())
+        .unwrap_or_default();
+    if live_status.last_successful_time.as_deref() == Some(finished_at) {
+        return Ok(());
+    }
+    let condition = crate::conditions::new_condition(
+        "Ready",
+        "True",
+        <hydradb_operator_api::spec::ConditionReason as hydradb_operator_api::spec::PhaseLabel>::label(
+            &hydradb_operator_api::spec::ConditionReason::Available,
+        ),
+        "backup completed",
+        generation,
+    );
+    let patch = serde_json::json!({
+        "status": {
+            "conditions": [condition],
+            "observedGeneration": generation,
+            "lastSuccessfulTime": finished_at,
+            "lastRunName": job,
+            "successfulBackups": live_status.successful_backups + 1,
+        }
+    });
+    api.patch_status(name, &PatchParams::default(), &Patch::Merge(&patch))
+        .await
+        .map_err(Error::from_kube_error)?;
+    Ok(())
+}
+
 /// Map a backup reconcile error onto a requeue action.
 #[must_use]
 pub fn error_policy(backup: Arc<GraphBackup>, error: &Error, _ctx: Arc<Ctx>) -> Action {
@@ -559,6 +662,11 @@ fn restore_env(cluster: &GraphCluster, verify: bool) -> Vec<EnvVar> {
         env.push(EnvVar {
             name: constants::HYDRADB_BACKUP_TARGET_BUCKET.to_owned(),
             value: Some(resolved_bucket(cluster)),
+            ..EnvVar::default()
+        });
+        env.push(EnvVar {
+            name: constants::HYDRADB_BACKUP_SOURCE_PREFIX.to_owned(),
+            value: Some(restore.prefix.clone().unwrap_or_default()),
             ..EnvVar::default()
         });
         env.push(EnvVar {

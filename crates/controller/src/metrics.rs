@@ -74,6 +74,21 @@ pub fn set_gauge(name: &str, labels: &[(&str, &str)], value: f64) {
         .insert(rendered, value);
 }
 
+/// Read a gauge sample back, keyed by the same label set used to set it.
+#[must_use]
+pub fn gauge_value(name: &str, labels: &[(&str, &str)]) -> Option<f64> {
+    let rendered = labels
+        .iter()
+        .map(|(key, value)| format!("{key}=\"{}\"", escape_label(value)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let reg = lock();
+    reg.gauges
+        .get(name)
+        .and_then(|samples| samples.get(&rendered))
+        .copied()
+}
+
 /// Drop every gauge whose family name starts with `prefix`.
 ///
 /// Called when a child disappears so a stale sample cannot keep an alert firing

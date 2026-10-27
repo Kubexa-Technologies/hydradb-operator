@@ -77,6 +77,7 @@ pub const OPERATOR_OWNED_ENV: &[&str] = &[
     constants::HYDRADB_BACKUP_TARGET_PREFIX,
     constants::HYDRADB_BACKUP_DIRECTION,
     constants::HYDRADB_BACKUP_VERIFY,
+    constants::HYDRADB_BACKUP_RETENTION,
     // Ingest contract: a user value could repoint the Bolt URL or the revision.
     constants::HYDRADB_INGEST_NAMESPACE,
     constants::HYDRADB_INGEST_GRAPH_ID,

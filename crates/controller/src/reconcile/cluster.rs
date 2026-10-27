@@ -1233,6 +1233,10 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
         crate::status::cluster_endpoints(&cluster),
         crate::status::sorted_bolt_addresses(&live_pod_names, &name, &namespace),
     );
+    // Index telemetry: scrape the indexer's own metrics service. A failure is
+    // recorded as `reachable: false` and never fails the reconcile: an indexer
+    // that is down is exactly when the status must still be written.
+    desired_status.indexing = scrape_indexing(&name, &namespace).await;
     if let Some(condition) = restore_condition {
         desired_status.conditions =
             crate::conditions::upsert_condition_returning(desired_status.conditions, condition);
@@ -1246,6 +1250,92 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
     }
 
     Ok(Action::requeue(Duration::from_secs(SUCCESS_REQUEUE_SECS)))
+}
+
+/// Scrape the indexer metrics service and derive [`IndexingStatus`].
+///
+/// Staleness is tracked through the operator's own gauge: it compares the
+/// published-generations counter with the previous observation, so
+/// `staleSeconds` grows exactly while no new generation lands. Purely local
+/// bookkeeping — no extra API objects, no CRD field to keep in sync.
+async fn scrape_indexing(cluster_name: &str, namespace: &str) -> IndexingStatus {
+    let service = indexer_metrics_service_name(cluster_name);
+    let address = format!("{service}.{namespace}.svc:{}", INDEXER_METRICS_PORT);
+    let Ok(body) = crate::scrape::fetch(&address, "/metrics").await else {
+        crate::metrics::set_gauge(
+            "hydradb_operator_index_reachable",
+            &[("name", cluster_name)],
+            0.0,
+        );
+        return IndexingStatus {
+            reachable: false,
+            ..IndexingStatus::default()
+        };
+    };
+    let published = crate::scrape::metric_value(&body, "graph_indexer_generations_published");
+    let failures = crate::scrape::metric_value(&body, "graph_indexer_generation_failures");
+    let fallbacks = crate::scrape::metric_value(&body, "graph_indexer_incremental_fallbacks");
+
+    let previous = crate::metrics::gauge_value(
+        "hydradb_operator_index_published_generations",
+        &[("name", cluster_name)],
+    );
+    let changed = published.is_some_and(|current| previous.is_none_or(|old| current > old));
+    let stale_seconds = if changed || previous.is_none() {
+        crate::metrics::set_gauge(
+            "hydradb_operator_index_last_publish_timestamp_seconds",
+            &[("name", cluster_name)],
+            unix_now(),
+        );
+        crate::metrics::set_gauge(
+            "hydradb_operator_index_stale_seconds",
+            &[("name", cluster_name)],
+            0.0,
+        );
+        Some(0)
+    } else {
+        let last = crate::metrics::gauge_value(
+            "hydradb_operator_index_last_publish_timestamp_seconds",
+            &[("name", cluster_name)],
+        )
+        .unwrap_or_else(unix_now);
+        let stale = unix_now() - last;
+        crate::metrics::set_gauge(
+            "hydradb_operator_index_stale_seconds",
+            &[("name", cluster_name)],
+            stale,
+        );
+        // Only non-negative staleness reaches here; the cast is bounded by the
+        // epoch-second magnitude, far inside u64.
+        Some(stale.max(0.0).round() as u64)
+    };
+
+    if let Some(current) = published {
+        crate::metrics::set_gauge(
+            "hydradb_operator_index_published_generations",
+            &[("name", cluster_name)],
+            current,
+        );
+    }
+    crate::metrics::set_gauge(
+        "hydradb_operator_index_reachable",
+        &[("name", cluster_name)],
+        1.0,
+    );
+    IndexingStatus {
+        generation: None,
+        published_generations: published.map(|value| value as u64),
+        incremental_fallbacks: fallbacks.map(|value| value as u64),
+        generation_failures: failures.map(|value| value as u64),
+        stale_seconds,
+        observed_at: Some(chrono::Utc::now().to_rfc3339()),
+        reachable: true,
+    }
+}
+
+/// Current unix time as an `f64` second count.
+fn unix_now() -> f64 {
+    chrono::Utc::now().timestamp() as f64
 }
 
 /// Requeue cadence while a restore job is in flight.
@@ -1301,6 +1391,11 @@ async fn reconcile_restore(
         .and_then(|status| status.succeeded)
         .is_some_and(|succeeded| succeeded > 0)
     {
+        crate::metrics::set_gauge(
+            "hydradb_operator_restore_failed",
+            &[("name", &cluster.name_any())],
+            0.0,
+        );
         return Ok(Some(crate::conditions::new_condition(
             "Restored",
             "True",
@@ -1313,6 +1408,11 @@ async fn reconcile_restore(
         .and_then(|status| status.failed)
         .is_some_and(|failed| failed > 0)
     {
+        crate::metrics::set_gauge(
+            "hydradb_operator_restore_failed",
+            &[("name", &cluster.name_any())],
+            1.0,
+        );
         return Ok(Some(crate::conditions::new_condition(
             "Restored",
             "False",
