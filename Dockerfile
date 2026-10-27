@@ -73,8 +73,10 @@ FROM cgr.dev/chainguard/wolfi-base@sha256:0feab531471d2edfcca55f18883441cb7df598
 
 # CA roots for the object-store and Kubernetes API TLS paths, plus tzdata for
 # the log timestamps. Installed as a virtual package so the layer stays minimal.
-RUN apk add --no-cache --virtual .hydradb-runtime ca-certificates-bundle tzdata \
-    && update-ca-certificates
+# Wolfi's `ca-certificates-bundle` already installs the concatenated store at
+# /etc/ssl/certs/ca-certificates.crt; there is no `update-ca-certificates`
+# script in this image (that comes from the `ca-certificates` package).
+RUN apk add --no-cache --virtual .hydradb-runtime ca-certificates-bundle tzdata
 # Explicit paths: a `bin` context missing either file is a hard build error.
 COPY --from=bin /hydradb-operator /usr/local/bin/hydradb-operator
 COPY --from=bin /hydradb /usr/local/bin/hydradb
