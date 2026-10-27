@@ -117,3 +117,13 @@ retries, TTL and status; the ingester owns parsing.
 An ingest pod must **not** run as the operator's ServiceAccount — the
 reconciler refuses `serviceAccount: hydradb-operator`, because the pod runs
 user-chosen code.
+
+## 4. What is *not* indexable
+
+HydraDB's open-source engine indexes its own WAL into GraphBLAS adjacency generations. It has **no
+vector index, no BM25/lexical index, and no entity extraction** — those live in HydraDB's hosted
+product, not in the AGPL repository.
+
+So an ingester's job is exactly one thing: turn a source into Cypher writes (`MERGE`/`CREATE` with
+properties). Writing "embeddings" is meaningless against this engine; if you need semantic recall,
+that layer is upstream's service, not something this operator can schedule for you.
