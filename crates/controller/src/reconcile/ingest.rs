@@ -33,8 +33,49 @@ use crate::error::Error;
 /// Requeue interval when idle.
 const IDLE_REQUEUE_SECS: u64 = 120;
 
-/// ServiceAccount the operator itself runs as (chart default).
+/// Environment variable listing the ServiceAccounts an ingest pod may use.
+///
+/// Empty or unset means "only `default`": the operator must never hand its own
+/// identity to a pod running user-chosen code, and an unset allowlist is the
+/// safe default rather than an open one.
+pub const ALLOWED_SERVICE_ACCOUNTS_ENV: &str = "OPERATOR_INGEST_ALLOWED_SERVICE_ACCOUNTS";
+
+/// ServiceAccount the operator itself runs as (chart default), always refused.
 const OPERATOR_SERVICE_ACCOUNT: &str = "hydradb-operator";
+
+/// Whether `service_account` may run an ingest pod.
+///
+/// Returns the reason when it may not, so the caller can surface it verbatim.
+#[must_use]
+pub fn reject_service_account(requested: Option<&str>) -> Option<String> {
+    let requested = requested?;
+    if requested == OPERATOR_SERVICE_ACCOUNT {
+        return Some(format!(
+            "serviceAccount `{requested}` is reserved for the operator itself: an ingest pod must \
+             use a dedicated identity"
+        ));
+    }
+    let allowlist: Vec<String> = std::env::var(ALLOWED_SERVICE_ACCOUNTS_ENV)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let permitted = if allowlist.is_empty() {
+        requested == "default"
+    } else {
+        allowlist.iter().any(|entry| entry == requested)
+    };
+    if permitted {
+        None
+    } else {
+        Some(format!(
+            "serviceAccount `{requested}` is not permitted for ingest pods; set \
+             {ALLOWED_SERVICE_ACCOUNTS_ENV} on the operator to allow it"
+        ))
+    }
+}
 
 /// Label carrying the owning source name, so job lookups stay exact even when
 /// one source name is a prefix of another (`docs` vs `docs-ingest`).
@@ -346,13 +387,9 @@ pub async fn reconcile(source: Arc<GraphIngestSource>, ctx: Arc<Ctx>) -> Result<
     }
 
     // Confused-deputy guard: the ingest pod runs user-chosen code, so it must
-    // never inherit the operator's own identity (cluster-wide secret read, job
-    // delete, certificate issuance).
-    if source.spec.service_account.as_deref() == Some(OPERATOR_SERVICE_ACCOUNT) {
-        let message = format!(
-            "serviceAccount `{OPERATOR_SERVICE_ACCOUNT}` is reserved for the operator itself: \
-             an ingest pod must use a dedicated identity"
-        );
+    // never inherit the operator's own identity, and only explicitly allowed
+    // identities may be used.
+    if let Some(message) = reject_service_account(source.spec.service_account.as_deref()) {
         write_status(&sources, &name, generation, "False", &message, None).await?;
         return Ok(Action::requeue(Duration::from_secs(IDLE_REQUEUE_SECS)));
     }

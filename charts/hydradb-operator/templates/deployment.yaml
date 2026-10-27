@@ -52,6 +52,11 @@ spec:
                   fieldPath: metadata.namespace
             - name: OPERATOR_SCOPE
               value: {{ .Values.installScope | quote }}
+            # Leader-election identity: the lease holder is the pod.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: OPERATOR_WEBHOOK_ADDR
               value: {{ if .Values.webhook.enabled }}{{ printf ":%.0f" .Values.webhook.port | quote }}{{ else }}"disabled"{{ end }}
             - name: RUST_LOG

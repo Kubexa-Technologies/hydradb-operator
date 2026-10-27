@@ -20,6 +20,15 @@ use crate::{reconcile, watcher};
 /// Address the health/metrics server binds.
 pub const HEALTH_ADDR: &str = "0.0.0.0:8080";
 
+/// Lease name the operator campaigns for, in its own namespace.
+pub const LEADER_LEASE_NAME: &str = "hydradb-operator-leader";
+
+/// Whether this replica currently believes it is the leader.
+///
+/// Drives `/readyz` and the `hydradb_operator_leader` gauge. A non-leader is
+/// healthy but NOT ready, so a Service stops routing webhook traffic to it.
+static IS_LEADER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Environment variable selecting the webhook receiver address.
 ///
 /// Unset, empty or `disabled` turns the receiver off, so a deployment that does
@@ -52,12 +61,10 @@ pub async fn run() -> Result<(), Error> {
     );
 
     // Controllers are registered here as their reconcilers land (todos 18/20/21).
-    let cluster_handle = spawn_graph_cluster_controller(&ctx);
-    let pool_handle = spawn_graph_nodepool_controller(&ctx);
-    let indexer_handle = spawn_graph_indexer_controller(&ctx);
-    let backup_handle = spawn_graph_backup_controller(&ctx);
-    let ingest_handle = spawn_graph_ingest_controller(&ctx);
-    let webhook_handle = spawn_webhook_receiver(&ctx).await?;
+    // Exactly one replica may reconcile: two leaders would race to create
+    // GraphBackup jobs and to answer the same webhook. Everything below is
+    // started only while this replica holds the lease.
+    let supervisor = spawn_leader_supervisor(&ctx);
 
     // The OTLP layer (if any) is attached in `main::init_tracing` while the
     // subscriber is built; nothing OTLP-related happens here.
@@ -69,16 +76,64 @@ pub async fn run() -> Result<(), Error> {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(Error::Server)?;
-    cluster_handle.abort();
-    pool_handle.abort();
-    indexer_handle.abort();
-    backup_handle.abort();
-    ingest_handle.abort();
-    if let Some(handle) = webhook_handle {
-        handle.abort();
-    }
+    supervisor.abort();
     tracing::info!("shutdown signal received, health server stopped");
     Ok(())
+}
+
+/// Spawn every reconciler and the webhook receiver, returning their handles.
+///
+/// Split out so the leader supervisor can start and stop the whole set as one
+/// unit: a replica that loses the lease must stop doing *all* of it.
+async fn spawn_all(ctx: &Ctx) -> Vec<tokio::task::JoinHandle<()>> {
+    let mut handles = vec![
+        spawn_graph_cluster_controller(ctx),
+        spawn_graph_nodepool_controller(ctx),
+        spawn_graph_indexer_controller(ctx),
+        spawn_graph_backup_controller(ctx),
+        spawn_graph_ingest_controller(ctx),
+    ];
+    match spawn_webhook_receiver(ctx).await {
+        Ok(Some(handle)) => handles.push(handle),
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "webhook receiver could not start"),
+    }
+    handles
+}
+
+/// Campaign for leadership, running the reconcilers only while it is held.
+///
+/// The loop is deliberately simple: acquire, run until renewal fails, stop
+/// everything, campaign again. Because [`leader::hold_leadership`] returns on
+/// any renew failure, a replica that loses contact with the apiserver stops
+/// reconciling rather than acting on a stale belief.
+fn spawn_leader_supervisor(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
+    use k8s_openapi::api::coordination::v1::Lease;
+
+    let leases = kube::Api::<Lease>::namespaced(ctx.client.clone(), &ctx.namespace);
+    let me = crate::leader::identity();
+    let context = ctx.clone();
+    tokio::spawn(async move {
+        loop {
+            if crate::leader::try_acquire(&leases, LEADER_LEASE_NAME, &me)
+                .await
+                .unwrap_or(false)
+            {
+                IS_LEADER.store(true, std::sync::atomic::Ordering::SeqCst);
+                crate::metrics::set_gauge("hydradb_operator_leader", &[("name", &me)], 1.0);
+                tracing::info!(identity = %me, "acquired leadership");
+                let handles = spawn_all(&context).await;
+                let _ = crate::leader::hold_leadership(&leases, LEADER_LEASE_NAME, &me).await;
+                for handle in handles {
+                    handle.abort();
+                }
+                IS_LEADER.store(false, std::sync::atomic::Ordering::SeqCst);
+                crate::metrics::set_gauge("hydradb_operator_leader", &[("name", &me)], 0.0);
+                tracing::warn!(identity = %me, "lost leadership, reconcilers stopped");
+            }
+            tokio::time::sleep(crate::leader::RENEW_INTERVAL).await;
+        }
+    })
 }
 
 /// Spawn the `GraphCluster` controller (todo 18) as a background task.
@@ -405,7 +460,17 @@ async fn healthz() -> impl IntoResponse {
 }
 
 async fn readyz() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "text/plain")], "ok\n")
+    // A follower is healthy but not ready: it does no reconciliation and must
+    // not receive webhook traffic, so the Service drops it from endpoints.
+    if !IS_LEADER.load(std::sync::atomic::Ordering::SeqCst) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "text/plain")],
+            "standby\n",
+        )
+            .into_response();
+    }
+    ([(header::CONTENT_TYPE, "text/plain")], "ok\n").into_response()
 }
 
 async fn metrics() -> impl IntoResponse {
@@ -530,10 +595,20 @@ mod tests {
             "healthz is text/plain, got: {healthz}"
         );
 
+        // A replica that has not won the lease is healthy but NOT ready, so the
+        // Service stops routing webhook traffic to it.
+        let standby = raw_get(port, "/readyz").await;
+        assert!(
+            status_line(&standby).contains("503"),
+            "a non-leader must report 503 on /readyz, got: {standby}"
+        );
+
+        IS_LEADER.store(true, std::sync::atomic::Ordering::SeqCst);
         let readyz = raw_get(port, "/readyz").await;
+        IS_LEADER.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(
             status_line(&readyz).contains("200"),
-            "readyz status is 200, got: {readyz}"
+            "readyz status is 200 once leader, got: {readyz}"
         );
         assert_eq!(body(&readyz), "ok\n", "readyz body is ok");
 

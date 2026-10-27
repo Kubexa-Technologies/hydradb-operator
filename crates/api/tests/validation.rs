@@ -28,6 +28,7 @@ fn valid_spec() -> GraphClusterSpec {
         graph: GraphIdentity {
             namespace: "production".to_string(),
             subnamespaces: Vec::new(),
+            cells: Vec::new(),
             id: "default".to_string(),
             database: "default".to_string(),
             cell_id: "cell-0".to_string(),

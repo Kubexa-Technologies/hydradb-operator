@@ -217,6 +217,24 @@ impl GraphClusterSpec {
         if self.graph.cell_id.is_empty() {
             errors.push(ValidationError::new("graph.cell_id", "must be non-empty"));
         }
+        if !self.graph.cells.is_empty() && !self.graph.cells.contains(&self.graph.cell_id) {
+            errors.push(ValidationError::new(
+                "graph.cells",
+                format!(
+                    "must include graph.cell_id (`{}`); the local cell has to be one of the \
+                     declared cells",
+                    self.graph.cell_id
+                ),
+            ));
+        }
+        for (index, cell) in self.graph.cells.iter().enumerate() {
+            if cell.trim().is_empty() {
+                errors.push(ValidationError::new(
+                    format!("graph.cells[{index}]"),
+                    "must be non-empty",
+                ));
+            }
+        }
         if !self.tls.enabled && !self.tls.additional_dns_names.is_empty() {
             errors.push(ValidationError::new(
                 "tls.additional_dns_names",

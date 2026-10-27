@@ -45,6 +45,12 @@ pub const TIMESTAMP_HEADER: &str = "x-hydradb-timestamp";
 pub const MAX_SKEW_SECS: u64 = 300;
 /// Default key inside the webhook Secret.
 pub const DEFAULT_WEBHOOK_KEY: &str = "token";
+/// Label a Secret must carry before the receiver will use it as an HMAC key.
+///
+/// Without this the operator becomes an online verification oracle for *any*
+/// Secret in the namespace: a CR author could point `secretRef` at an unrelated
+/// Secret and use the 401/500 split to test guesses against it.
+pub const WEBHOOK_KEY_LABEL: &str = "hydradb.kubexa.tech/webhook-key";
 /// Largest body the receiver accepts.
 pub const MAX_BODY_BYTES: usize = 1024 * 1024;
 

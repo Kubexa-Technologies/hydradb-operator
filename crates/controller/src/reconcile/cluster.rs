@@ -692,10 +692,14 @@ pub fn config_data(
             constants::GRAPH_CELL_ID.to_owned(),
             spec.graph.cell_id.clone(),
         ),
-        // Single-cell only: exactly one cell, so the list is the cell itself.
+        // Every declared cell; a single-cell cluster emits just its own.
         (
             constants::GRAPH_CELLS.to_owned(),
-            spec.graph.cell_id.clone(),
+            if spec.graph.cells.is_empty() {
+                spec.graph.cell_id.clone()
+            } else {
+                spec.graph.cells.join(",")
+            },
         ),
         (
             constants::CLOUD_PROVIDER.to_owned(),

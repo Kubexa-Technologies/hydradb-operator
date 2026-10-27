@@ -187,8 +187,20 @@ spec:
                 description: Graph identity served by this cluster.
                 properties:
                   cellId:
-                    description: Primary cell served by this cluster (`GRAPH_CELL_ID`).
+                    description: Cell this cluster's nodes serve (`GRAPH_CELL_ID`).
                     type: string
+                  cells:
+                    description: |-
+                      Every cell in the graph (`GRAPH_CELLS`).
+                      
+                      Absent means a single-cell deployment, in which case the list is exactly
+                      `[cell_id]`. Listing more than one cell is only correct when those cells
+                      exist elsewhere too: the operand uses the list to size per-cell
+                      coordination, so inventing cells here makes placement expect peers that
+                      never heartbeat.
+                    items:
+                      type: string
+                    type: array
                   database:
                     description: HydraDB database name (`GRAPH_DATABASE`).
                     type: string

@@ -48,8 +48,17 @@ pub struct GraphIdentity {
     pub id: String,
     /// HydraDB database name (`GRAPH_DATABASE`).
     pub database: String,
-    /// Primary cell served by this cluster (`GRAPH_CELL_ID`).
+    /// Cell this cluster's nodes serve (`GRAPH_CELL_ID`).
     pub cell_id: String,
+    /// Every cell in the graph (`GRAPH_CELLS`).
+    ///
+    /// Absent means a single-cell deployment, in which case the list is exactly
+    /// `[cell_id]`. Listing more than one cell is only correct when those cells
+    /// exist elsewhere too: the operand uses the list to size per-cell
+    /// coordination, so inventing cells here makes placement expect peers that
+    /// never heartbeat.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cells: Vec<String>,
 }
 
 /// Client-auth configuration for the cluster.

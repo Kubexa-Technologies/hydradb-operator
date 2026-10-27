@@ -39,7 +39,8 @@ API group `hydradb.kubexa.tech`, version `v1alpha1`.
 | spec.extraEnv[].valueFrom.secretKeyRef.name | string | required |  | Name of the referent. This field is effectively required, but due to backwards compatibility is allowed to be empty. Instances of this type with an empty value here are almost certainly wrong. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names |
 | spec.extraEnv[].valueFrom.secretKeyRef.optional | boolean | optional |  | Specify whether the Secret or its key must be defined |
 | spec.graph | object | required |  | Graph identity served by this cluster. |
-| spec.graph.cellId | string | required |  | Primary cell served by this cluster (`GRAPH_CELL_ID`). |
+| spec.graph.cellId | string | required |  | Cell this cluster's nodes serve (`GRAPH_CELL_ID`). |
+| spec.graph.cells | array | optional |  | Every cell in the graph (`GRAPH_CELLS`).<br/><br/>Absent means a single-cell deployment, in which case the list is exactly<br/>`[cell_id]`. Listing more than one cell is only correct when those cells<br/>exist elsewhere too: the operand uses the list to size per-cell<br/>coordination, so inventing cells here makes placement expect peers that<br/>never heartbeat. |
 | spec.graph.database | string | required |  | HydraDB database name (`GRAPH_DATABASE`). |
 | spec.graph.id | string | required |  | HydraDB graph id (`GRAPH_ID`). |
 | spec.graph.namespace | string | required |  | Root tenant namespace (`GRAPH_NAMESPACE`). |

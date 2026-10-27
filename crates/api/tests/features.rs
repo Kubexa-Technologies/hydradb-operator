@@ -41,6 +41,7 @@ fn cluster_spec() -> GraphClusterSpec {
         graph: GraphIdentity {
             namespace: "tenant".to_string(),
             subnamespaces: Vec::new(),
+            cells: Vec::new(),
             id: "graph".to_string(),
             database: "default".to_string(),
             cell_id: "cell-0".to_string(),

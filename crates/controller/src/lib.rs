@@ -23,6 +23,7 @@ pub mod conditions;
 pub mod context;
 pub mod error;
 pub mod finalizer;
+pub mod leader;
 pub mod metrics;
 pub mod reconcile;
 pub mod run;
