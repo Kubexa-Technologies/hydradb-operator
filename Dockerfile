@@ -30,14 +30,14 @@
 #   - Runs as non-root 65532:65532 (the :nonroot base default, set explicitly).
 
 # --- planner: compute the cargo-chef dependency recipe -----------------------
-FROM rust:1.92@sha256:f58923369ba295ae1f60bc49d03f2c955a5c93a0b7d49acfb2b2a65bebaf350d AS planner
+FROM rust:1.99@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b657e9359327ac2ffc AS planner
 WORKDIR /src
 RUN cargo install cargo-chef --locked --version 0.1.78
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 # --- chef: pre-build the dependency skeleton for a warm layer cache ---------
-FROM rust:1.92@sha256:f58923369ba295ae1f60bc49d03f2c955a5c93a0b7d49acfb2b2a65bebaf350d AS chef
+FROM rust:1.99@sha256:931c2c0531a8b143e044f0f3914dfe802f15bb3d1955f0b657e9359327ac2ffc AS chef
 WORKDIR /src
 RUN cargo install cargo-chef --locked --version 0.1.78
 COPY --from=planner /src/recipe.json recipe.json
