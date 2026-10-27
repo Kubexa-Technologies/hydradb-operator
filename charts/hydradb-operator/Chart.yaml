@@ -11,6 +11,13 @@ icon: file://icon.svg
 sources:
   - https://git.kubexa.tech/oss/hydradb-operator
   - https://helmforge.dev
+keywords:
+  - hydradb
+  - graph-database
+  - graph
+  - cypher
+  - operator
+  - kubernetes
 maintainers:
   - name: helmforge
     url: https://helmforge.dev
@@ -26,12 +33,13 @@ annotations:
     - name: Docs
       url: https://git.kubexa.tech/oss/hydradb-operator
   artifacthub.io/operator: "true"
+  # Level 2 of the Operator Capability Levels: the operator reconciles upgrades
+  # and upgrades its operand in place. It does not yet automate backups from
+  # inside the chart lifecycle, so it is not Full Lifecycle.
+  artifacthub.io/operatorCapabilities: Seamless Upgrades
   artifacthub.io/prerelease: "false"
   artifacthub.io/recommended-permissions: |
     ClusterRole hydradb-operator is required; see deploy/rbac/operator-clusterrole.yaml
   helmforge.dev/maturity: experimental
   helmforge.dev/signed: gpg+cosign
   helmforge.dev/repository: oci://harbor.kubexa.tech/oss/hydradb-operator
-signKey:
-  fingerprint: TODO-GPG-FINGERPRINT
-  url: TODO-SIGNKEY-URL

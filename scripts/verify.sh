@@ -5,8 +5,9 @@
 #
 # Runs every check a reviewer is expected to run before approving a change:
 # formatting, lints, the workspace test suite, generated-artifact drift, and the
-# full Helm chart contract (lint, unit tests, and strict schema validation of the
-# default render plus every `ci/` scenario).
+# full Helm chart contract (lint, unit tests, strict schema validation of the
+# default render plus every `ci/` scenario, the five-CRD bundle contract,
+# Artifact Hub metadata, and a kubescape security-posture floor).
 #
 # Deliberately requires NO cluster and NO credentials: every leg is offline-safe
 # apart from the CRDs-catalog schema lookup that kubeconform performs.
@@ -24,7 +25,7 @@ fail() { printf '\n\033[1;31mFAILED (exit %s): %s\033[0m\n' "$?" "$BASH_COMMAND"
 trap fail ERR
 
 step "preflight: required tools"
-for tool in cargo helm kubeconform; do
+for tool in cargo helm kubeconform ah kubescape; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     printf 'missing required tool: %s\n' "$tool" >&2
     exit 1
@@ -86,5 +87,56 @@ for values_file in "$CHART"/ci/*values.yaml; do
   helm template hydradb-operator "$CHART" -f "$values_file" |
     kubeconform -strict -summary -schema-location default -schema-location "$CRDS_CATALOG" -
 done
+
+# Artifact Hub metadata: errors block publishing the chart, and the operator
+# capability level is what makes it discoverable as an operator rather than a
+# plain application chart.
+step "ah lint (Artifact Hub metadata)"
+ah lint -p "$CHART"
+
+# Static security posture of the RENDERED manifests. The threshold is 80 rather
+# than 100 because two findings are inherent to being a controller and cannot be
+# removed without breaking it:
+#   - "List Kubernetes secrets": the operator reads auth and object-store
+#     credential Secrets to mount them into operand pods;
+#   - "Roles with delete capabilities": children are garbage-collected on CR
+#     deletion, which requires delete verbs.
+# Gated on the MEAN of the three frameworks, not on kubescape's own exit code:
+# it returns non-zero for any single failed control, and two failures are
+# inherent to being a controller — "List Kubernetes secrets" (the operator reads
+# auth and object-store credential Secrets to mount them into operand pods) and
+# "Roles with delete capabilities" (children are garbage-collected on CR
+# deletion). A hard zero-failure gate would therefore be unsatisfiable.
+# Gated on the MEAN of the three frameworks, not on kubescape's exit code: it
+# returns non-zero for any single failed control, and two failures are inherent
+# to being a controller — "List Kubernetes secrets" (the operator reads auth and
+# object-store credential Secrets to mount into operand pods) and "Roles with
+# delete capabilities" (children are garbage-collected on CR deletion). A
+# zero-failure gate would be unsatisfiable by design.
+KUBESCAPE_MIN_SCORE=80
+step "kubescape (MITRE,NSA,SOC2; minimum mean score ${KUBESCAPE_MIN_SCORE}%)"
+rendered=$(mktemp --suffix=.yaml)
+report=$(mktemp --suffix=.json)
+helm template hydradb-operator "$CHART" > "$rendered"
+if ! grep -Eq '^kind: (Pod|Deployment|StatefulSet|DaemonSet|Job|CronJob)$' "$rendered"; then
+  printf '    kubescape not applicable: chart renders no workload kinds\n'
+  rm -f "$rendered" "$report"
+else
+  # kubescape exits non-zero for ANY failed control, and the ERR trap fires even
+  # under `set +e`, so the scan and every extraction are explicitly tolerated.
+  kubescape scan framework "MITRE,NSA,SOC2" "$rendered" \
+    --format json --output "$report" >/dev/null 2>&1 || true
+  mean=$(jq -r '[.summaryDetails.frameworks[].complianceScore] | (add / length)' "$report" 2>/dev/null) || true
+  mean_int=$(LC_ALL=C awk -v m="${mean:-0}" 'BEGIN { printf "%d", m }') || true
+  printf '    kubescape mean compliance: %s%%\n' \
+    "$(LC_ALL=C awk -v m="${mean:-0}" 'BEGIN { printf "%.1f", m }')"
+  jq -r '.summaryDetails.frameworks[] | "      \(.name): \(.complianceScore | floor)%"' \
+    "$report" 2>/dev/null || true
+  rm -f "$rendered" "$report"
+  if [ "${mean_int:-0}" -lt "$KUBESCAPE_MIN_SCORE" ]; then
+    printf 'kubescape mean score is below the %s%% floor\n' "$KUBESCAPE_MIN_SCORE" >&2
+    exit 1
+  fi
+fi
 
 printf '\n\033[1;32mAll verification gates passed.\033[0m\n'
