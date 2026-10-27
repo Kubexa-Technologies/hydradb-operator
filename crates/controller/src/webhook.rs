@@ -273,10 +273,13 @@ async fn find_source(
     if let Some(source) = api.get_opt(path).await.map_err(Error::from_kube_error)? {
         return Ok(Some(source));
     }
-    let all = api
-        .list(&kube::api::ListParams::default())
-        .await
-        .map_err(Error::from_kube_error)?;
+    // A 404 here means the CRD is not installed in this cluster; that is
+    // "no such source", not a server error.
+    let all = match api.list(&kube::api::ListParams::default()).await {
+        Ok(list) => list,
+        Err(kube::Error::Api(response)) if response.code == 404 => return Ok(None),
+        Err(error) => return Err(Error::from_kube_error(error)),
+    };
     Ok(all
         .items
         .into_iter()

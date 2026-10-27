@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, Subcommand};
 
+pub mod backup;
 pub mod cmd;
 pub mod output;
 
@@ -72,6 +73,10 @@ pub enum Command {
     Doctor(cmd::doctor::DoctorArgs),
     /// Patch a `GraphNodePool`/`GraphIndexer` replica count.
     Scale(cmd::scale::ScaleArgs),
+    /// Copy the cluster's object store to a backup location.
+    Backup(cmd::backup::BackupArgs),
+    /// Copy a backup back into the cluster's object store.
+    Restore(cmd::backup::BackupArgs),
     /// Print the CLI crate version.
     Version(cmd::version::VersionArgs),
 }
@@ -87,6 +92,10 @@ pub enum CliError {
         /// Plan todo that owns the implementation.
         owning_todo: u32,
     },
+
+    /// Object-store copy error.
+    #[error("backup error: {0}")]
+    Backup(#[from] crate::backup::BackupError),
 
     /// Kubernetes client or API error.
     #[error("kubernetes error: {0}")]
@@ -199,6 +208,8 @@ async fn run() -> Result<(), CliError> {
         Command::Logs(args) => cmd::logs::run(&cli, args).await,
         Command::Doctor(args) => cmd::doctor::run(&cli, args).await,
         Command::Scale(args) => cmd::scale::run(&cli, args).await,
+        Command::Backup(args) => cmd::backup::run_backup(args).await,
+        Command::Restore(args) => cmd::backup::run_restore(args).await,
         Command::Version(args) => cmd::version::run(args).await,
     }
 }

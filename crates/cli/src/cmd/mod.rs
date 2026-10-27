@@ -8,6 +8,9 @@
 
 use crate::{Cli, CliError};
 
+/// `hydradb backup` / `hydradb restore` — object-store copies.
+pub mod backup;
+
 /// `hydradb status` — summarise `GraphCluster`/`GraphNodePool`/`GraphIndexer`
 /// conditions as a kstatus string (todo 28).
 pub mod status;

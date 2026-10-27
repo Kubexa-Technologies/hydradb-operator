@@ -739,3 +739,201 @@ pub fn merge_env(base: Vec<EnvVar>, extra: &[EnvVar]) -> Vec<EnvVar> {
     }
     merged.into_values().collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hydradb_operator_api::constants as c;
+    use k8s_openapi::api::core::v1::EnvVar;
+
+    #[test]
+    fn every_tuning_leaf_maps_to_its_own_env_name() {
+        let tuning = TuningSpec {
+            graphblas: hydradb_operator_api::spec::GraphBlasTuning {
+                max_bytes: Some(1),
+                max_matrices: Some(2),
+                max_adjacencies: Some(3),
+                max_adjacency_bytes: Some(4),
+                max_concurrent_compilations: Some(5),
+            },
+            query: hydradb_operator_api::spec::QueryTuning {
+                max_runtime_ms: Some(6),
+                default_page_size: Some(7),
+                max_server_cursors: Some(8),
+                max_cursor_buffer_bytes: Some(9),
+                cursor_ttl_ms: Some(10),
+                slow_query_ms: Some(11),
+                max_concurrent_hydrations: Some(12),
+                max_bookmark_wait_ms: Some(13),
+                txn_max_retries: Some(14),
+            },
+            connection: hydradb_operator_api::spec::ConnectionTuning {
+                max_connections: Some(15),
+                idle_timeout_ms: Some(16),
+                max_age_ms: Some(17),
+                authentication_timeout_ms: Some(18),
+                graceful_shutdown_ms: Some(19),
+            },
+            storage: hydradb_operator_api::spec::StorageTuning {
+                cache_part_bytes: Some(20),
+                l0_flush_parallelism: Some(21),
+                l0_sst_size_bytes: Some(22),
+                maintenance_batch_keys: Some(23),
+                artifact_gc_batch_keys: Some(24),
+                artifact_write_batch_keys: Some(25),
+                wal_flush_interval_ms: Some(26),
+                trim_memory_after_hydration: Some(true),
+            },
+            engine: hydradb_operator_api::spec::EngineTuning {
+                cypher_engine: Some("a".to_owned()),
+                compiled_kernel: Some("b".to_owned()),
+                sparse_kernel: Some("c".to_owned()),
+                profile_matrix: Some(true),
+            },
+            placement: hydradb_operator_api::spec::PlacementTuning {
+                heartbeat_interval_ms: Some(27),
+                heartbeat_timeout_ms: Some(28),
+                writer_lease_ms: Some(29),
+                write_lanes: Some(30),
+                read_routing: Some("follower".to_owned()),
+                reader_manifest_poll_interval_ms: Some(31),
+                index_discovery_interval_ms: Some(32),
+            },
+        };
+        let env = tuning_env(&tuning);
+        assert_eq!(env.len(), 38, "every leaf must produce exactly one env var");
+        // Spot-check the mapping in both directions.
+        for (key, value) in [
+            (c::GRAPH_MAX_GRAPHBLAS_BYTES, "1"),
+            (c::GRAPH_DEFAULT_PAGE_SIZE, "7"),
+            (c::GRAPH_MAX_BOLT_CONNECTIONS, "15"),
+            (c::GRAPH_L0_FLUSH_PARALLELISM, "21"),
+            (c::GRAPH_CYPHER_ENGINE, "a"),
+            (c::GRAPH_WRITER_LEASE_MS, "29"),
+            (c::GRAPH_READER_MANIFEST_POLL_INTERVAL, "31"),
+        ] {
+            assert_eq!(env.get(key).map(String::as_str), Some(value), "{key}");
+        }
+        assert_eq!(
+            env.get(c::GRAPH_TRIM_MEMORY_AFTER_HYDRATION)
+                .map(String::as_str),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn an_empty_tuning_block_emits_nothing() {
+        assert!(tuning_env(&TuningSpec::default()).is_empty());
+    }
+
+    #[test]
+    fn role_env_sets_the_role_and_a_downward_api_identity() {
+        let env = role_env(&NodeRole::Reader);
+        assert_eq!(env.len(), 2);
+        assert_eq!(env[0].name, c::GRAPH_NODE_ROLE);
+        assert_eq!(env[0].value.as_deref(), Some("reader"));
+        assert_eq!(env[1].name, c::GRAPH_NODE_ID);
+        assert!(
+            env[1].value_from.is_some(),
+            "node id must come from the downward API"
+        );
+    }
+
+    #[test]
+    fn read_routing_only_applies_to_readers() {
+        assert_eq!(read_routing_for(&NodeRole::Reader), Some("follower"));
+        assert_eq!(read_routing_for(&NodeRole::Writer), None);
+        assert_eq!(read_routing_for(&NodeRole::All), None);
+    }
+
+    #[test]
+    fn push_or_replace_never_duplicates_a_name() {
+        let mut env = vec![EnvVar {
+            name: "A".to_owned(),
+            value: Some("1".to_owned()),
+            ..EnvVar::default()
+        }];
+        push_or_replace(
+            &mut env,
+            EnvVar {
+                name: "A".to_owned(),
+                value: Some("2".to_owned()),
+                ..EnvVar::default()
+            },
+        );
+        assert_eq!(env.len(), 1);
+        assert_eq!(env[0].value.as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn merge_env_prefers_the_extra_value() {
+        let base = vec![EnvVar {
+            name: "A".to_owned(),
+            value: Some("base".to_owned()),
+            ..EnvVar::default()
+        }];
+        let extra = vec![EnvVar {
+            name: "A".to_owned(),
+            value: Some("extra".to_owned()),
+            ..EnvVar::default()
+        }];
+        let merged = merge_env(base, &extra);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].value.as_deref(), Some("extra"));
+    }
+
+    #[test]
+    fn secret_volume_projects_the_secret_read_only() {
+        let volume = secret_volume("tls", "demo-tls").expect("volume builds");
+        assert_eq!(volume.name, "tls");
+        let source = volume.secret.expect("secret source");
+        assert_eq!(source.secret_name.as_deref(), Some("demo-tls"));
+        assert_eq!(source.optional, Some(false));
+    }
+
+    #[test]
+    fn a_missing_crd_is_treated_as_an_absent_object() {
+        let api_error = kube::Error::Api(Box::new(kube::core::Status {
+            status: Some(kube::core::response::StatusSummary::Failure),
+            message: "the server could not find the requested resource".to_owned(),
+            reason: "NotFound".to_owned(),
+            code: 404,
+            details: None,
+            metadata: Default::default(),
+        }));
+        assert!(missing_kind_or_object(&api_error));
+        let other = kube::Error::Api(Box::new(kube::core::Status {
+            status: Some(kube::core::response::StatusSummary::Failure),
+            message: "boom".to_owned(),
+            reason: "InternalError".to_owned(),
+            code: 500,
+            details: None,
+            metadata: Default::default(),
+        }));
+        assert!(!missing_kind_or_object(&other));
+    }
+
+    #[test]
+    fn prometheus_alert_set_covers_the_documented_failure_modes() {
+        let rules = prometheus_alert_rules();
+        let array = rules.as_array().expect("array of rules");
+        let names: Vec<&str> = array
+            .iter()
+            .filter_map(|rule| rule.get("alert").and_then(|value| value.as_str()))
+            .collect();
+        for expected in [
+            "HydraDBIndexStalled",
+            "HydraDBIndexGenerationFailing",
+            "HydraDBNodesNotReady",
+            "HydraDBBackupNotSucceeding",
+            "HydraDBRestoreFailed",
+        ] {
+            assert!(names.contains(&expected), "missing alert {expected}");
+        }
+        // Every rule must carry a severity and an expression.
+        for rule in array {
+            assert!(rule.get("expr").is_some(), "rule without expr");
+            assert!(rule.get("labels").is_some(), "rule without labels");
+        }
+    }
+}

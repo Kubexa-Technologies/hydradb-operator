@@ -11,6 +11,11 @@ repository.workspace = true
 name = "hydradb"
 path = "src/main.rs"
 
+[features]
+default = ["s3"]
+# Object-store copy engine behind `hydradb backup` / `hydradb restore`.
+s3 = ["dep:object_store"]
+
 [dependencies]
 hydradb-operator-api = { path = "../api", version = "0.1.0" }
 kube.workspace = true
@@ -23,3 +28,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
+futures.workspace = true
+object_store = { version = "0.12", features = ["aws"], optional = true }
