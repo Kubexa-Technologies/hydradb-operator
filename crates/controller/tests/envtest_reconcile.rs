@@ -39,6 +39,8 @@ const NAMESPACE: &str = "default";
 /// `NotFound` (a real cluster serves one with or without prometheus-operator
 /// CRDs installed).
 async fn boot_env() -> envtest::Server {
+    // Must run before the environment builds its own HTTPS client.
+    hydradb_operator::install_crypto_provider();
     let mut crds: Vec<serde_json::Value> = [
         GraphCluster::crd(),
         GraphNodePool::crd(),
@@ -80,6 +82,7 @@ async fn boot_env() -> envtest::Server {
 }
 
 fn ctx_for(client: Client) -> Arc<Ctx> {
+    hydradb_operator::install_crypto_provider();
     Arc::new(Ctx::new(client, WatchScope::Namespaced).expect("test context builds"))
 }
 

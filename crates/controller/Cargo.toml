@@ -20,6 +20,7 @@ otlp = [
 ]
 
 [dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 hydradb-operator-api = { path = "../api", version = "0.1.0" }
 kube.workspace = true
 k8s-openapi.workspace = true

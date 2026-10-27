@@ -130,9 +130,19 @@ mod tests {
     /// Serializes the scope env-var tests: the environment is process-global.
     static SCOPE_ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// Install a process-level rustls provider exactly once.
+    ///
+    /// kube builds its TLS connector eagerly, so a test client needs one. With
+    /// more than one provider in the dependency graph (object_store pulls its
+    /// own) rustls refuses to pick a default and panics instead.
+    fn install_crypto_provider() {
+        crate::install_crypto_provider();
+    }
+
     /// Offline client: `try_from` builds the connector without any I/O, so no
     /// cluster is needed to assert the `Api` shapes below.
     fn test_client() -> kube::Client {
+        install_crypto_provider();
         let config = kube::Config::new("http://127.0.0.1:1".parse().expect("loopback URI parses"));
         kube::Client::try_from(config).expect("client builds without I/O")
     }
@@ -140,9 +150,11 @@ mod tests {
     /// Set `OPERATOR_SCOPE` (and the operator namespace) under the guard, run
     /// `f`, then restore a clean environment.
     fn with_env(scope: Option<&str>, f: impl FnOnce()) {
+        // A panicking test poisons the guard and would fail every sibling for
+        // an unrelated reason; recover instead.
         let _guard = SCOPE_ENV_GUARD
             .lock()
-            .expect("scope env guard is not poisoned");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         // SAFETY: the guard serializes every env mutation in this test
         // binary, and no other thread reads these vars concurrently.
         unsafe {

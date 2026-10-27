@@ -41,6 +41,7 @@ pub const DEFAULT_WEBHOOK_ADDR: &str = "disabled";
 pub async fn run() -> Result<(), Error> {
     // Parse the scope BEFORE building the client: an invalid OPERATOR_SCOPE
     // must fail fast at startup even when no cluster is reachable.
+    crate::install_crypto_provider();
     let scope = crate::context::WatchScope::from_env()?;
     let client = kube::Client::try_default().await.map_err(Error::Client)?;
     let ctx = Ctx::new(client, scope)?;
