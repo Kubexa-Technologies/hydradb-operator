@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use hydradb_operator_api::crd::{GraphCluster, GraphNodePool};
-use hydradb_operator_api::spec::{NodeRole, PhaseLabel, TuningSpec};
+use hydradb_operator_api::spec::{NodeRole, TuningSpec};
 use k8s_openapi::api::core::v1::{EnvVar, EnvVarSource, ObjectFieldSelector};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::core::{ApiResource, DynamicObject, GroupVersionKind};
