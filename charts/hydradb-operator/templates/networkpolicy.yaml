@@ -33,9 +33,17 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+    # 443/6443: object storage + apiserver. 9090/9091: the operand's admin and
+    # indexer metrics ports, which the controller scrapes to publish
+    # status.indexing. Omitting them makes that scrape fail silently and leaves
+    # the operator looking permanently "unreachable".
     - ports:
         - port: 443
           protocol: TCP
         - port: 6443
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+        - port: 9091
           protocol: TCP
 {{- end }}
