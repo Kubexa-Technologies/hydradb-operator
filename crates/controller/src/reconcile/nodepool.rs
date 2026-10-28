@@ -418,6 +418,17 @@ pub fn desired_statefulset(
                 prefix: None,
                 secret_ref: None,
             }];
+            // Object-bucket-claim backends: the provisioner writes the
+            // credentials into the claim's own Secret, and without this the S3
+            // client finds no key and falls back to IMDS (link-local, blocked),
+            // producing endless transport timeouts.
+            if let Some(claim) = cluster.spec.object_store.object_bucket_claim.as_ref() {
+                sources.push(EnvFromSource {
+                    secret_ref: crate::children::secret_env_source(&claim.name),
+                    prefix: None,
+                    config_map_ref: None,
+                });
+            }
             // Explicit S3 backends carry their own credentials Secret; without
             // this the operand cannot authenticate against its own store.
             if let Some(credentials) = cluster

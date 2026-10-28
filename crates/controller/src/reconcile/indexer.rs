@@ -312,14 +312,39 @@ pub fn desired_deployment(
         name: CONTAINER_NAME.to_owned(),
         image: Some(image),
         command: Some(vec![CONTAINER_NAME.to_owned()]),
-        env_from: Some(vec![EnvFromSource {
-            config_map_ref: Some(ConfigMapEnvSource {
-                name: cluster_child_name(&cluster_name, ROLE_CONFIG),
-                optional: None,
-            }),
-            prefix: None,
-            secret_ref: None,
-        }]),
+        env_from: Some({
+            let mut sources = vec![EnvFromSource {
+                config_map_ref: Some(ConfigMapEnvSource {
+                    name: cluster_child_name(&cluster_name, ROLE_CONFIG),
+                    optional: None,
+                }),
+                prefix: None,
+                secret_ref: None,
+            }];
+            // Credentials: the claim's own Secret for OBC backends, or the
+            // user's Secret for explicit ones. Without either, the S3 client
+            // falls back to IMDS and times out.
+            if let Some(claim) = cluster.spec.object_store.object_bucket_claim.as_ref() {
+                sources.push(EnvFromSource {
+                    secret_ref: crate::children::secret_env_source(&claim.name),
+                    prefix: None,
+                    config_map_ref: None,
+                });
+            } else if let Some(credentials) = cluster
+                .spec
+                .object_store
+                .explicit
+                .as_ref()
+                .and_then(|explicit| explicit.credentials_secret_ref.as_ref())
+            {
+                sources.push(EnvFromSource {
+                    secret_ref: crate::children::secret_env_source(&credentials.name),
+                    prefix: None,
+                    config_map_ref: None,
+                });
+            }
+            sources
+        }),
         env: Some(indexer_env(&indexer.spec, &cluster.spec.extra_env)),
         ports: Some(vec![ContainerPort {
             name: Some("admin".to_owned()),
