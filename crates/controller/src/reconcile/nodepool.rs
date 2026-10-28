@@ -785,6 +785,10 @@ async fn write_status_if_changed(
                 "readyReplicas": desired.ready_replicas,
                 "currentReplicas": desired.current_replicas,
                 "boltAddresses": desired.bolt_addresses,
+                // Computed by `ready_status` and previously dropped here: the
+                // patch body lists fields explicitly, so `role` never reached
+                // the API and every pool reported an empty role.
+                "role": desired.role,
             }
         })),
     )
