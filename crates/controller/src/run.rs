@@ -81,6 +81,23 @@ pub async fn run() -> Result<(), Error> {
     Ok(())
 }
 
+/// Whether a child kind is actually served by this cluster.
+///
+/// `.owns()` on a kind whose CRD is absent makes the controller's watch return
+/// a 404 on every retry — an endless "invalid type: integer 404" stream error.
+/// Optional integrations (cert-manager, prometheus-operator) must therefore be
+/// watched only when they exist.
+async fn kind_is_served<K>(api: &kube::Api<K>) -> bool
+where
+    K: kube::Resource + serde::de::DeserializeOwned + Clone + std::fmt::Debug,
+{
+    match api.list(&kube::api::ListParams::default().limit(1)).await {
+        Ok(_) => true,
+        Err(kube::Error::Api(response)) if response.code == 404 => false,
+        Err(_) => false,
+    }
+}
+
 /// Spawn every reconciler and the webhook receiver, returning their handles.
 ///
 /// Split out so the leader supervisor can start and stop the whole set as one
@@ -162,7 +179,7 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
         // shares the cached outcome via the config builders.
         let support = watcher::probe_watcher_support(&client).await;
         let owned_selector = CLUSTER_SELECTOR_LABEL;
-        let running = Controller::new(clusters, watcher::watcher_config(&support))
+        let mut controller = Controller::new(clusters, watcher::watcher_config(&support))
             .owns(
                 context.api::<ConfigMap>(),
                 watcher::owned_watcher_config(owned_selector, &support),
@@ -174,19 +191,37 @@ fn spawn_graph_cluster_controller(ctx: &Ctx) -> tokio::task::JoinHandle<()> {
             .owns(
                 context.api::<NetworkPolicy>(),
                 watcher::owned_watcher_config(owned_selector, &support),
-            )
-            .owns(
+            );
+
+        // Optional ecosystem children: watching a kind whose CRD is absent
+        // returns 404 forever ("invalid type: integer 404, expected
+        // WatchEvent"), so each watch is added only when it can succeed.
+        if kind_is_served(&context.api::<ServiceMonitorObject>()).await {
+            controller = controller.owns(
                 context.api::<ServiceMonitorObject>(),
                 watcher::owned_watcher_config(owned_selector, &support),
-            )
-            .owns(
+            );
+        } else {
+            tracing::info!("ServiceMonitor CRD absent; not watching it");
+        }
+        if kind_is_served(&context.api::<CertificateObject>()).await {
+            controller = controller.owns(
                 context.api::<CertificateObject>(),
                 watcher::owned_watcher_config(owned_selector, &support),
-            )
-            .owns(
+            );
+        } else {
+            tracing::info!("cert-manager Certificate CRD absent; not watching it");
+        }
+        if kind_is_served(&context.api::<PrometheusRuleObject>()).await {
+            controller = controller.owns(
                 context.api::<PrometheusRuleObject>(),
                 watcher::owned_watcher_config(owned_selector, &support),
-            )
+            );
+        } else {
+            tracing::info!("PrometheusRule CRD absent; not watching it");
+        }
+
+        let running = controller
             .with_config(watcher::controller_config())
             .shutdown_on_signal()
             .run(
