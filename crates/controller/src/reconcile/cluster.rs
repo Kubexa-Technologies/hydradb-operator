@@ -161,6 +161,31 @@ pub fn resolve_explicit(s3: &S3) -> Result<ResolvedObjectStore, Error> {
 /// # Errors
 ///
 /// Returns [`Error::MissingSecret`] when the key is absent or not UTF-8.
+/// Read one non-empty key from the OBC's generated ConfigMap.
+///
+/// The lib-bucket-provisioner splits the claim across two objects: credentials
+/// (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`) go to the Secret, while the
+/// addressing fields (`BUCKET_NAME`, `BUCKET_HOST`, `BUCKET_PORT`,
+/// `BUCKET_REGION`) go to the ConfigMap. Reading the bucket name from the
+/// Secret fails on every real cluster.
+fn obc_configmap_string(
+    configmap: &ConfigMap,
+    secret_name: &str,
+    key: &str,
+) -> Result<String, Error> {
+    match configmap
+        .data
+        .as_ref()
+        .and_then(|data| data.get(key))
+        .map(|value| value.trim())
+    {
+        Some(value) if !value.is_empty() => Ok(value.to_owned()),
+        _ => Err(Error::MissingConfigMap(format!(
+            "configmap for objectBucketClaim {secret_name} carries no non-empty key {key}"
+        ))),
+    }
+}
+
 fn obc_secret_string(secret: &Secret, secret_name: &str, key: &str) -> Result<String, Error> {
     let raw: &[u8] = secret
         .data
@@ -231,11 +256,11 @@ pub fn resolve_obc(
         .name
         .clone()
         .unwrap_or_else(|| obc_name.to_owned());
-    let bucket = obc_secret_string(obc_secret, &secret_name, OBC_BUCKET_NAME)?;
-    let region = obc_secret_string(obc_secret, &secret_name, OBC_BUCKET_REGION)
+    let bucket = obc_configmap_string(obc_configmap, &secret_name, OBC_BUCKET_NAME)?;
+    let region = obc_configmap_string(obc_configmap, &secret_name, OBC_BUCKET_REGION)
         .unwrap_or_else(|_| DEFAULT_REGION.to_owned());
-    let host = obc_secret_string(obc_secret, &secret_name, OBC_BUCKET_HOST)?;
-    let port = obc_secret_string(obc_secret, &secret_name, OBC_BUCKET_PORT).ok();
+    let host = obc_configmap_string(obc_configmap, &secret_name, OBC_BUCKET_HOST)?;
+    let port = obc_configmap_string(obc_configmap, &secret_name, OBC_BUCKET_PORT).ok();
     // Fail fast when the credential keys are absent; the values stay in the
     // OBC Secret and are never copied into the ConfigMap.
     obc_secret_string(obc_secret, &secret_name, OBC_ACCESS_KEY_ID)?;
@@ -1674,16 +1699,6 @@ mod tests {
                 "AWS_SECRET_ACCESS_KEY".to_owned(),
                 ByteString(b"secret".to_vec()),
             ),
-            ("BUCKET_NAME".to_owned(), ByteString(b"obc-bucket".to_vec())),
-            (
-                "BUCKET_HOST".to_owned(),
-                ByteString(b"s3.example.com".to_vec()),
-            ),
-            ("BUCKET_PORT".to_owned(), ByteString(b"80".to_vec())),
-            (
-                "BUCKET_REGION".to_owned(),
-                ByteString(b"eu-west-1".to_vec()),
-            ),
         ]);
         Secret {
             metadata: k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta {
@@ -1705,10 +1720,12 @@ mod tests {
                 namespace: Some("default".to_owned()),
                 ..Default::default()
             },
-            data: Some(BTreeMap::from([(
-                "BUCKET_HOST".to_owned(),
-                "s3.example.com".to_owned(),
-            )])),
+            data: Some(BTreeMap::from([
+                ("BUCKET_NAME".to_owned(), "obc-bucket".to_owned()),
+                ("BUCKET_HOST".to_owned(), "s3.example.com".to_owned()),
+                ("BUCKET_PORT".to_owned(), "80".to_owned()),
+                ("BUCKET_REGION".to_owned(), "eu-west-1".to_owned()),
+            ])),
             immutable: None,
             binary_data: None,
         }
