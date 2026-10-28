@@ -1,0 +1,138 @@
+suite: operator values are wired (operator-only scope)
+templates:
+  - deployment.yaml
+  - serviceaccount.yaml
+  - pdb.yaml
+  - servicemonitor.yaml
+  - webhook-service.yaml
+tests:
+  - it: extraEnv reaches the controller container
+    template: deployment.yaml
+    set:
+      extraEnv:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://otel:4317
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="OTEL_EXPORTER_OTLP_ENDPOINT")].value
+          value: http://otel:4317
+
+  - it: extraArgs is appended, never replaces the probe flag
+    template: deployment.yaml
+    set:
+      extraArgs:
+        - --foo=bar
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --health-probe-bind-address=:8080
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --foo=bar
+
+  - it: serviceAccount.create=false renders no ServiceAccount and honours the override name
+    set:
+      serviceAccount:
+        create: false
+        name: existing
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.serviceAccountName
+          value: existing
+
+  - it: serviceAccount annotations are applied when created
+    set:
+      serviceAccount:
+        create: true
+        annotations:
+          eks.amazonaws.com/role-arn: arn:aws:iam::1:role/x
+    template: serviceaccount.yaml
+    asserts:
+      - equal:
+          path: metadata.annotations["eks.amazonaws.com/role-arn"]
+          value: arn:aws:iam::1:role/x
+
+  - it: pod labels and annotations land on the pod template, not the Deployment
+    set:
+      podLabels:
+        team: data
+      podAnnotations:
+        prometheus.io/scrape: "true"
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels.team
+          value: data
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+
+  - it: scheduling and rollout controls are rendered
+    set:
+      priorityClassName: system-cluster-critical
+      terminationGracePeriodSeconds: 45
+      revisionHistoryLimit: 7
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.priorityClassName
+          value: system-cluster-critical
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 45
+      - equal:
+          path: spec.revisionHistoryLimit
+          value: 7
+      - lengthEqual:
+          path: spec.template.spec.topologySpreadConstraints
+          count: 1
+
+  - it: pdb.minAvailable is configurable
+    set:
+      pdb:
+        enabled: true
+        minAvailable: 2
+    template: pdb.yaml
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 2
+
+  - it: serviceMonitor interval and labels are configurable
+    set:
+      monitoring:
+        serviceMonitor:
+          enabled: true
+          interval: 15s
+          labels:
+            release: kube-prometheus-stack
+    template: servicemonitor.yaml
+    asserts:
+      - equal:
+          path: spec.endpoints[0].interval
+          value: 15s
+      - equal:
+          path: metadata.labels.release
+          value: kube-prometheus-stack
+
+  - it: webhook service type and annotations are configurable
+    set:
+      webhook:
+        enabled: true
+        service:
+          type: LoadBalancer
+          annotations:
+            metallb.io/address-pool: public
+    template: webhook-service.yaml
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+      - equal:
+          path: metadata.annotations["metallb.io/address-pool"]
+          value: public

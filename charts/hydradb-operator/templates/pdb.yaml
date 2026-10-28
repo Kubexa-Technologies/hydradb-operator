@@ -8,7 +8,7 @@ metadata:
   labels:
     {{- include "hydradb-operator.labels" . | nindent 4 }}
 spec:
-  minAvailable: 1
+  minAvailable: {{ .Values.pdb.minAvailable }}
   selector:
     matchLabels:
       {{- include "hydradb-operator.selectorLabels" . | nindent 6 }}

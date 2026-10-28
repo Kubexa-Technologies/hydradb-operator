@@ -1,5 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
-# Default values for hydradb-operator.
+#
+# hydradb-operator values.
+#
+# SCOPE — read this first:
+#   This chart deploys ONLY the operator (the controller Deployment, its RBAC,
+#   ServiceAccount, Service, PDB, NetworkPolicy and optional ServiceMonitor).
+#
+#   It does NOT configure a HydraDB cluster. Graphs, node pools, indexers,
+#   backups and ingest sources are declared with the custom resources
+#   (GraphCluster / GraphNodePool / GraphIndexer / GraphBackup /
+#   GraphIngestSource) and their spec is owned by those objects. Nothing in this
+#   file can change how a graph runs: image, storage, auth, TLS, tuning and
+#   scaling all live on the CRs.
+#
+#   Rule of thumb: if the setting describes the *controller process or its pod*,
+#   it belongs here. If it describes the *database*, it belongs on a CR.
+
 # -- Operator container image repository (registry + path).
 image:
   # -- Operator container image repository (registry + path).
@@ -12,56 +28,109 @@ image:
   pullPolicy: IfNotPresent
   # -- Image pull secrets for private registries.
   pullSecrets: []
+
 # -- Number of operator Deployment replicas.
-replicaCount: 1
+#
+# >1 is safe: the leader-election lease elects exactly one active reconciler and
+# the others stay ready but idle (they serve /readyz as 503 until promoted).
+replicaCount: 2
+
 # -- Operator container resource requests and limits.
 resources:
-  # -- CPU resource requests.
   requests:
-    # -- CPU request.
     cpu: 100m
-    # -- Memory request.
     memory: 128Mi
-  # -- CPU resource limits.
   limits:
-    # -- CPU limit.
     cpu: 500m
-    # -- Memory limit.
     memory: 512Mi
-# -- Node selector constraints for operator pods.
+
+# -- Node selector for operator pods (e.g. pin to an architecture).
 nodeSelector: {}
-# -- Toleration rules for operator pods.
+# -- Tolerations for operator pods.
 tolerations: []
-# -- Affinity rules for operator pods.
+# -- Affinity for operator pods.
 affinity: {}
-# -- Ingest webhook receiver: push-triggered runs for GraphIngestSource.
-# Disabled by default: no listener means no unauthenticated ingress surface.
+# -- Topology spread constraints for operator pods (HA scheduling).
+topologySpreadConstraints: []
+# -- Priority class ensuring the controller survives node pressure.
+priorityClassName: ""
+
+# -- ServiceAccount for the operator Deployment.
+serviceAccount:
+  # -- Create the ServiceAccount (set false to use a pre-existing one).
+  create: true
+  # -- Override the ServiceAccount name (empty uses the chart fullname).
+  name: ""
+  # -- Annotations, e.g. eks.amazonaws.com/role-arn for IRSA.
+  annotations: {}
+  # -- Mount the API token into the pod (required for in-cluster operation).
+  automount: true
+
+# -- Extra annotations for operator pods.
+podAnnotations: {}
+# -- Extra labels for operator pods.
+podLabels: {}
+# -- Extra environment variables for the operator container.
+#
+# This is the supported way to configure the controller process:
+#   OPERATOR_SCOPE, OPERATOR_NAMESPACE, RUST_LOG, RUST_BACKTRACE,
+#   OTEL_EXPORTER_OTLP_ENDPOINT, OPERATOR_WEBHOOK_ADDR,
+#   OPERATOR_INGEST_ALLOWED_SERVICE_ACCOUNTS (comma-separated list; empty means
+#   only `default`, and the operator's own SA is always refused).
+extraEnv: []
+# -- Extra command-line arguments for the operator binary.
+extraArgs: []
+# -- Grace period for operator pod termination, in seconds.
+terminationGracePeriodSeconds: 30
+# -- Number of old ReplicaSets retained for rollback.
+revisionHistoryLimit: 3
+
+# -- Ingest webhook receiver: the controller's authenticated HTTP endpoint that
+# starts GraphIngestSource runs on push. It configures the RECEIVER, not the
+# ingest job (which is defined on the GraphIngestSource CR).
 webhook:
-  # -- Expose the webhook receiver and its Service.
+  # -- Expose the receiver and its Service.
   enabled: false
   # -- Container/Service port the receiver listens on.
   port: 8081
-# -- Operator watch scope: "namespaced" watches OPERATOR_NAMESPACE only, "cluster" watches all namespaces.
+  service:
+    # -- Service type for the receiver (ClusterIP, NodePort, LoadBalancer).
+    type: ClusterIP
+    # -- Annotations for the receiver Service (e.g. MetalLB address pinning).
+    annotations: {}
+
+# -- Operator watch scope: "namespaced" watches OPERATOR_NAMESPACE only,
+# "cluster" watches all namespaces. Use "cluster" when the GraphCluster CRs live
+# in namespaces other than the release namespace.
 installScope: namespaced
-# -- Monitoring integration settings.
+
+# -- Monitoring integration for the operator.
 monitoring:
-  # -- Prometheus ServiceMonitor settings.
   serviceMonitor:
-    # -- Enable creation of a ServiceMonitor for the operator metrics endpoint.
+    # -- Create a ServiceMonitor scraping the operator's /metrics.
     enabled: false
-# -- Custom Resource Definition handling.
+    # -- Scrape interval.
+    interval: 30s
+    # -- Extra labels for the ServiceMonitor (e.g. your Prometheus release selector).
+    labels: {}
+
+# -- Install the HydraDB CRDs (GraphCluster, GraphNodePool, GraphIndexer,
+# GraphBackup, GraphIngestSource) with the chart.
 crds:
-  # -- Install CRDs from charts/hydradb-operator/crds on install/upgrade.
   install: true
-# -- Log verbosity settings.
+
+# -- Operator log configuration.
 log:
-  # -- Tracing/logging filter directive (RUST_LOG format).
+  # -- RUST_LOG filter directive for the controller.
   level: info
-# -- PodDisruptionBudget settings for the operator Deployment.
+
+# -- Operator PodDisruptionBudget.
 pdb:
-  # -- Enable creation of a PodDisruptionBudget (minAvailable: 1).
+  # -- Create a PDB for the operator pods.
   enabled: true
-# -- NetworkPolicy settings for the operator pods.
+  # -- Pods that must remain available during voluntary disruption.
+  minAvailable: 1
+
+# -- Operator NetworkPolicy (ingress to the health/metrics port, DNS + API + S3 egress).
 networkPolicy:
-  # -- Enable creation of a NetworkPolicy (healthz ingress, DNS/apiserver egress).
   enabled: true

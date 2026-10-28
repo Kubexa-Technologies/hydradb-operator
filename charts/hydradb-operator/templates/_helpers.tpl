@@ -26,7 +26,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* serviceAccountName: operator service account name. */}}
 {{- define "hydradb-operator.serviceAccountName" -}}
+{{- if .Values.serviceAccount.name -}}
+{{ .Values.serviceAccount.name }}
+{{- else -}}
 {{ include "hydradb-operator.fullname" . }}
+{{- end -}}
 {{- end -}}
 
 {{/* isCluster: true when installScope is cluster. */}}

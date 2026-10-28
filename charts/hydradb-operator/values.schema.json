@@ -1,6 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "hydradb-operator values",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -9,18 +8,15 @@
       "additionalProperties": false,
       "properties": {
         "repository": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "tag": {
-          "type": "string",
-          "minLength": 1,
-          "not": {
-            "const": "latest"
-          }
+          "type": "string"
         },
         "digest": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^(|[a-f0-9]{64})$",
+          "description": "Pinned digest as bare hex (the template adds the sha256: prefix)."
         },
         "pullPolicy": {
           "type": "string",
@@ -38,61 +34,22 @@
         }
       },
       "required": [
-        "repository",
-        "tag",
-        "digest",
-        "pullPolicy",
-        "pullSecrets"
-      ]
+        "repository"
+      ],
+      "description": "Operator container image."
     },
     "replicaCount": {
       "type": "integer",
       "minimum": 1
     },
     "resources": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "requests": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "cpu": {
-              "type": "string"
-            },
-            "memory": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "cpu",
-            "memory"
-          ]
-        },
-        "limits": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "cpu": {
-              "type": "string"
-            },
-            "memory": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "cpu",
-            "memory"
-          ]
-        }
-      },
-      "required": [
-        "requests",
-        "limits"
-      ]
+      "type": "object"
     },
     "nodeSelector": {
-      "type": "object"
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "tolerations": {
       "type": "array",
@@ -102,6 +59,115 @@
     },
     "affinity": {
       "type": "object"
+    },
+    "topologySpreadConstraints": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "priorityClassName": {
+      "type": "string"
+    },
+    "serviceAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "automount": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "create"
+      ],
+      "description": "ServiceAccount for the operator."
+    },
+    "podAnnotations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "podLabels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "extraEnv": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Extra env for the controller process (scope, log level, OTLP, ingest SA allowlist)."
+    },
+    "extraArgs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "revisionHistoryLimit": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "webhook": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "ClusterIP",
+                "NodePort",
+                "LoadBalancer"
+              ]
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "port"
+      ],
+      "description": "Ingest webhook receiver for the controller."
     },
     "installScope": {
       "type": "string",
@@ -120,6 +186,15 @@
           "properties": {
             "enabled": {
               "type": "boolean"
+            },
+            "interval": {
+              "type": "string"
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           },
           "required": [
@@ -148,8 +223,7 @@
       "additionalProperties": false,
       "properties": {
         "level": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         }
       },
       "required": [
@@ -162,6 +236,10 @@
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "minAvailable": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [
@@ -179,41 +257,6 @@
       "required": [
         "enabled"
       ]
-    },
-    "webhook": {
-      "type": "object",
-      "description": "Ingest webhook receiver (push-triggered GraphIngestSource runs).",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Expose the receiver and its Service."
-        },
-        "port": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65535,
-          "description": "Receiver port."
-        }
-      },
-      "required": [
-        "enabled",
-        "port"
-      ]
     }
-  },
-  "required": [
-    "image",
-    "replicaCount",
-    "resources",
-    "nodeSelector",
-    "tolerations",
-    "affinity",
-    "installScope",
-    "monitoring",
-    "crds",
-    "log",
-    "pdb",
-    "networkPolicy"
-  ]
+  }
 }

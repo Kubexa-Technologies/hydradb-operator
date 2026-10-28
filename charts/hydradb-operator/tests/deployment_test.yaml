@@ -24,11 +24,13 @@ tests:
           path: kind
           value: Deployment
 
-  - it: defaults to a single replica
+  # Two replicas by default: the leader-election lease keeps exactly one active
+  # reconciler and the standby serves /readyz as 503 until promoted.
+  - it: defaults to two replicas for HA
     asserts:
       - equal:
           path: spec.replicas
-          value: 1
+          value: 2
         documentSelector:
           path: kind
           value: Deployment
@@ -47,11 +49,11 @@ tests:
   - it: pins a digest when image.digest is set
     set:
       image:
-        digest: abc123
+        digest: "0000000000000000000000000000000000000000000000000000000000000000"
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: harbor.kubexa.tech/oss/hydradb-operator:v0.1.0@sha256:abc123
+          value: harbor.kubexa.tech/oss/hydradb-operator:v0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000
         documentSelector:
           path: kind
           value: Deployment
