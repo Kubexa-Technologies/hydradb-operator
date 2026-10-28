@@ -175,6 +175,9 @@ pub fn pool_status_needs_write(live: &GraphNodePoolStatus, desired: &GraphNodePo
         || live.ready_replicas != desired.ready_replicas
         || live.current_replicas != desired.current_replicas
         || live.bolt_addresses != desired.bolt_addresses
+        // Omitting this made the role patch dead code: the writer skipped the
+        // patch because nothing it compared had changed.
+        || live.role != desired.role
 }
 
 /// Whether the indexer status write must happen: conditions plus

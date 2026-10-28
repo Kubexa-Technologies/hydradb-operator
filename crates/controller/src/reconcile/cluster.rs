@@ -548,14 +548,21 @@ pub fn desired_network_policy(cluster: &GraphCluster) -> Result<NetworkPolicy, E
         pod_selector: Some(LabelSelector::default()),
         ..NetworkPolicyPeer::default()
     };
+    // Data ports stay namespace-local: only peers of the cluster talk Bolt/HTTPS.
     let ingress = NetworkPolicyIngressRule {
         from: Some(vec![namespace_peer]),
+        ports: Some(vec![netpol_port(BOLT_PORT), netpol_port(HTTPS_TARGET_PORT)]),
+    };
+    // Metrics are scraped from other namespaces by design: the operator itself
+    // (for status.indexing) and Prometheus via the ServiceMonitor. Restricting
+    // them to the pod's own namespace silently broke both — the operator could
+    // not reach port 9091 and reported reachable=false forever.
+    let metrics_ingress = NetworkPolicyIngressRule {
         ports: Some(vec![
-            netpol_port(BOLT_PORT),
-            netpol_port(HTTPS_TARGET_PORT),
             netpol_port(METRICS_PORT),
             netpol_port(INDEXER_METRICS_PORT),
         ]),
+        ..NetworkPolicyIngressRule::default()
     };
     let dns_egress = NetworkPolicyEgressRule {
         ports: Some(vec![
@@ -584,7 +591,7 @@ pub fn desired_network_policy(cluster: &GraphCluster) -> Result<NetworkPolicy, E
                 ..LabelSelector::default()
             }),
             policy_types: Some(vec!["Ingress".to_owned(), "Egress".to_owned()]),
-            ingress: Some(vec![ingress]),
+            ingress: Some(vec![ingress, metrics_ingress]),
             egress: Some(vec![dns_egress, store_egress]),
         }),
     })
@@ -2432,29 +2439,48 @@ mod tests {
             Some(vec!["Ingress".to_owned(), "Egress".to_owned()]),
             "policy must restrict both directions"
         );
-        let ingress = spec.ingress.expect("policy must carry an ingress rule");
-        assert_eq!(ingress.len(), 1, "exactly one ingress rule");
-        let mut ports: Vec<i32> = ingress[0]
-            .ports
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|port| match port.port {
-                Some(IntOrString::Int(value)) => value,
-                other => panic!("ingress port must be numeric, got: {other:?}"),
-            })
-            .collect();
-        ports.sort_unstable();
+        let ingress = spec.ingress.expect("policy must carry ingress rules");
         assert_eq!(
-            ports,
-            vec![7687, 8443, 9090, 9091],
-            "ingress must open exactly Bolt/HTTPS/admin/indexer-admin"
+            ingress.len(),
+            2,
+            "data ports and metrics ports need different peer sets"
+        );
+        let numeric = |rule: &k8s_openapi::api::networking::v1::NetworkPolicyIngressRule| {
+            let mut ports: Vec<i32> = rule
+                .ports
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|port| match port.port {
+                    Some(IntOrString::Int(value)) => value,
+                    other => panic!("ingress port must be numeric, got: {other:?}"),
+                })
+                .collect();
+            ports.sort_unstable();
+            ports
+        };
+        // Data ports stay namespace-local: only cluster peers talk Bolt/HTTPS.
+        assert_eq!(
+            numeric(&ingress[0]),
+            vec![7687, 8443],
+            "Bolt/HTTPS must stay namespace-local"
         );
         let from = ingress[0].from.clone().unwrap_or_default();
-        assert_eq!(from.len(), 1, "exactly one ingress source");
+        assert_eq!(from.len(), 1, "exactly one ingress source for data ports");
         assert!(
             from[0].pod_selector.is_some() && from[0].ip_block.is_none(),
-            "ingress source must be same-namespace pods, got: {from:?}"
+            "data-port source must be same-namespace pods, got: {from:?}"
+        );
+        // Metrics are scraped across namespaces (operator, Prometheus); an
+        // empty peer set is exactly what permits that.
+        assert_eq!(
+            numeric(&ingress[1]),
+            vec![9090, 9091],
+            "admin/indexer metrics must be scrapeable from other namespaces"
+        );
+        assert!(
+            ingress[1].from.is_none(),
+            "metrics rule must not restrict peers, or scrapers are blocked"
         );
         let egress = spec.egress.expect("policy must carry egress rules");
         assert_eq!(egress.len(), 2, "DNS plus object-store egress");
