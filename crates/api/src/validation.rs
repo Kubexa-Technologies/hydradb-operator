@@ -67,6 +67,7 @@ pub const OPERATOR_OWNED_ENV: &[&str] = &[
     constants::RUST_LOG,
     constants::RUST_MIN_STACK,
     constants::GRAPH_READ_ROUTING,
+    constants::GRAPH_ALLOW_PLAINTEXT,
     // Backup/restore contract: a user value could redirect a copy to another
     // bucket (exfiltration) or flip a restore into a backup.
     constants::HYDRADB_BACKUP_SOURCE_BUCKET,

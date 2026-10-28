@@ -136,6 +136,12 @@ pub const GRAPH_READER_MANIFEST_POLL_INTERVAL: &str = "GRAPH_READER_MANIFEST_POL
 /// Index discovery interval in milliseconds.
 pub const GRAPH_INDEX_DISCOVERY_INTERVAL_MS: &str = "GRAPH_INDEX_DISCOVERY_INTERVAL_MS";
 
+/// Allow serving without TLS (`"true"`/`"false"`).
+///
+/// The operand refuses to start with neither a certificate nor this flag:
+/// "graph runtime requires GRAPH_TLS_CERTIFICATE and GRAPH_TLS_PRIVATE_KEY
+/// unless GRAPH_ALLOW_PLAINTEXT=true".
+pub const GRAPH_ALLOW_PLAINTEXT: &str = "GRAPH_ALLOW_PLAINTEXT";
 /// Path to the serving certificate the operand presents.
 pub const GRAPH_TLS_CERTIFICATE: &str = "GRAPH_TLS_CERTIFICATE";
 /// Path to the serving certificate's private key.

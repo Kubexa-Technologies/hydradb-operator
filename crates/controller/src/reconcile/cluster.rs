@@ -774,6 +774,12 @@ pub fn config_data(
             GRAPH_MAX_QUERY_SCAN_EDGES.to_owned(),
             spec.runtime.max_query_scan_edges.to_string(),
         ),
+        // Without TLS the operand must be told plaintext is intended, or it
+        // refuses to start at all.
+        (
+            constants::GRAPH_ALLOW_PLAINTEXT.to_owned(),
+            (!spec.tls.enabled).to_string(),
+        ),
         (
             GRAPH_AUTH_TOKEN_FILE.to_owned(),
             format!("{AUTH_MOUNT_DIR}/{auth_key}"),
