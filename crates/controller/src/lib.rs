@@ -22,6 +22,7 @@ pub mod children;
 pub mod conditions;
 pub mod context;
 pub mod error;
+pub mod events;
 pub mod finalizer;
 pub mod leader;
 pub mod metrics;

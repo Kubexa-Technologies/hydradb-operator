@@ -1120,7 +1120,8 @@ async fn cleanup_pool(pool: Arc<GraphNodePool>, ctx: Arc<Ctx>) -> Result<Action,
 
 /// Map a reconcile failure to a requeue delay via [`Error::class`].
 #[must_use]
-pub fn error_policy(pool: Arc<GraphNodePool>, error: &Error, _ctx: Arc<Ctx>) -> Action {
+pub fn error_policy(pool: Arc<GraphNodePool>, error: &Error, ctx: Arc<Ctx>) -> Action {
+    crate::events::report_for(ctx.client.clone(), "GraphNodePool", pool.as_ref(), error);
     let key = format!(
         "{}/{}",
         pool.namespace().unwrap_or_default(),

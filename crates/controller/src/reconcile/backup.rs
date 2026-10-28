@@ -625,7 +625,8 @@ async fn write_backup_success(
 
 /// Map a backup reconcile error onto a requeue action.
 #[must_use]
-pub fn error_policy(backup: Arc<GraphBackup>, error: &Error, _ctx: Arc<Ctx>) -> Action {
+pub fn error_policy(backup: Arc<GraphBackup>, error: &Error, ctx: Arc<Ctx>) -> Action {
+    crate::events::report_for(ctx.client.clone(), "GraphBackup", backup.as_ref(), error);
     Action::requeue(error.requeue_after(&backup.name_any()))
 }
 

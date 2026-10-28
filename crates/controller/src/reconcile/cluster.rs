@@ -1320,7 +1320,30 @@ async fn sm_kind_is_served(ctx: &Ctx, namespace: &str) -> bool {
 async fn scrape_indexing(cluster_name: &str, namespace: &str) -> IndexingStatus {
     let service = indexer_metrics_service_name(cluster_name);
     let address = format!("{service}.{namespace}.svc:{}", INDEXER_METRICS_PORT);
+    // Read the previous reachability before overwriting it: a *transition* is
+    // worth a log line, a persistent state is not. The original code swallowed
+    // the failure entirely, which is why `status.indexing.reachable=false` was
+    // invisible in the logs.
+    let was_reachable = crate::metrics::gauge_value(
+        "hydradb_operator_index_reachable",
+        &[("name", cluster_name)],
+    )
+    .is_some_and(|value| value > 0.5);
+
     let Ok(body) = crate::scrape::fetch(&address, "/metrics").await else {
+        if was_reachable {
+            tracing::warn!(
+                address = %address,
+                cluster = %cluster_name,
+                "indexer metrics became unreachable; status.indexing is now stale"
+            );
+        } else {
+            tracing::debug!(
+                address = %address,
+                cluster = %cluster_name,
+                "indexer metrics still unreachable"
+            );
+        }
         crate::metrics::set_gauge(
             "hydradb_operator_index_reachable",
             &[("name", cluster_name)],
@@ -1374,6 +1397,13 @@ async fn scrape_indexing(cluster_name: &str, namespace: &str) -> IndexingStatus 
             "hydradb_operator_index_published_generations",
             &[("name", cluster_name)],
             current,
+        );
+    }
+    if !was_reachable {
+        tracing::info!(
+            address = %address,
+            cluster = %cluster_name,
+            "indexer metrics reachable"
         );
     }
     crate::metrics::set_gauge(
@@ -1700,7 +1730,8 @@ async fn cleanup_cluster(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
 
 /// Map a reconcile failure to a requeue delay via [`Error::class`].
 #[must_use]
-pub fn error_policy(cluster: Arc<GraphCluster>, error: &Error, _ctx: Arc<Ctx>) -> Action {
+pub fn error_policy(cluster: Arc<GraphCluster>, error: &Error, ctx: Arc<Ctx>) -> Action {
+    crate::events::report_for(ctx.client.clone(), "GraphCluster", cluster.as_ref(), error);
     let key = format!(
         "{}/{}",
         cluster.namespace().unwrap_or_default(),

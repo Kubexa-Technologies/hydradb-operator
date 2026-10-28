@@ -907,7 +907,8 @@ async fn cleanup_indexer(indexer: Arc<GraphIndexer>, ctx: Arc<Ctx>) -> Result<Ac
 
 /// Map a reconcile failure to a requeue delay via [`Error::class`].
 #[must_use]
-pub fn error_policy(indexer: Arc<GraphIndexer>, error: &Error, _ctx: Arc<Ctx>) -> Action {
+pub fn error_policy(indexer: Arc<GraphIndexer>, error: &Error, ctx: Arc<Ctx>) -> Action {
+    crate::events::report_for(ctx.client.clone(), "GraphIndexer", indexer.as_ref(), error);
     let key = format!(
         "{}/{}",
         indexer.namespace().unwrap_or_default(),

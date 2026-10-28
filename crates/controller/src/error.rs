@@ -184,6 +184,32 @@ impl Error {
         }
     }
 
+    /// Machine-readable event reason for this failure.
+    ///
+    /// Mapped from the concrete variant where it carries meaning, so
+    /// `kubectl get events` groups "which dependency is missing" separately
+    /// from "the spec is invalid".
+    #[must_use]
+    pub fn event_reason(&self) -> &'static str {
+        match self {
+            Error::MissingSecret(_) | Error::MissingConfigMap(_) => "MissingDependency",
+            Error::Validation(_) | Error::InvalidSpec(_) | Error::InvalidScope(_) => {
+                "ValidationFailed"
+            }
+            Error::UnresolvableRef(_) | Error::MissingField(_) => "UnresolvableReference",
+            Error::PermissionDenied(_) => "PermissionDenied",
+            Error::Unsupported(_) => "Unsupported",
+            Error::Conflict(_) => "Conflict",
+            Error::RateLimited(_) => "RateLimited",
+            Error::Timeout(_) => "Timeout",
+            _ => match self.class() {
+                ErrorClass::Terminal => "ReconcileFailed",
+                ErrorClass::Structural => "ReconcileStalled",
+                ErrorClass::Transient => "TransientFailure",
+            },
+        }
+    }
+
     /// Whether reconciliation should emit a Kubernetes Event for this error.
     ///
     /// `false` for transport/connectivity failures so a flapping apiserver

@@ -590,7 +590,13 @@ pub async fn trigger_run(
 
 /// Map an ingest reconcile error onto a requeue action.
 #[must_use]
-pub fn error_policy(source: Arc<GraphIngestSource>, error: &Error, _ctx: Arc<Ctx>) -> Action {
+pub fn error_policy(source: Arc<GraphIngestSource>, error: &Error, ctx: Arc<Ctx>) -> Action {
+    crate::events::report_for(
+        ctx.client.clone(),
+        "GraphIngestSource",
+        source.as_ref(),
+        error,
+    );
     Action::requeue(error.requeue_after(&source.name_any()))
 }
 
