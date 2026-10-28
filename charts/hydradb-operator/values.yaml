@@ -114,8 +114,17 @@ monitoring:
     # -- Extra labels for the ServiceMonitor (e.g. your Prometheus release selector).
     labels: {}
 
-# -- Install the HydraDB CRDs (GraphCluster, GraphNodePool, GraphIndexer,
-# GraphBackup, GraphIngestSource) with the chart.
+# -- HydraDB CRDs (GraphCluster, GraphNodePool, GraphIndexer, GraphBackup,
+# GraphIngestSource).
+#
+# IMPORTANT — Helm only reads crds/ on `helm install`, never on `helm upgrade`.
+# So `install: true` means "present after a fresh install", NOT "kept in sync".
+# To upgrade CRDs with the chart version you must either:
+#   * Flux: set upgrade.crds: CreateReplace on the HelmRelease (what this repo
+#     does for hydradb), or
+#   * plain Helm: `kubectl apply --server-side -f charts/hydradb-operator/crds/`
+#     as a separate, reviewable step.
+# Set install: false when CRDs are managed outside the release entirely.
 crds:
   install: true
 

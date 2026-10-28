@@ -211,7 +211,8 @@
       "additionalProperties": false,
       "properties": {
         "install": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Render/install the CRDs on first install. Helm never upgrades crds/; use Flux upgrade.crds: CreateReplace or apply them separately."
         }
       },
       "required": [

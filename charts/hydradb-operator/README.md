@@ -56,7 +56,7 @@ Kubernetes: `>=1.26.0-0`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Affinity for operator pods. |
-| crds | object | `{"install":true}` | Install the HydraDB CRDs (GraphCluster, GraphNodePool, GraphIndexer, GraphBackup, GraphIngestSource) with the chart. |
+| crds | object | `{"install":true}` | HydraDB CRDs (GraphCluster, GraphNodePool, GraphIndexer, GraphBackup, GraphIngestSource).  IMPORTANT — Helm only reads crds/ on `helm install`, never on `helm upgrade`. So `install: true` means "present after a fresh install", NOT "kept in sync". To upgrade CRDs with the chart version you must either:   * Flux: set upgrade.crds: CreateReplace on the HelmRelease (what this repo     does for hydradb), or   * plain Helm: `kubectl apply --server-side -f charts/hydradb-operator/crds/`     as a separate, reviewable step. Set install: false when CRDs are managed outside the release entirely. |
 | extraArgs | list | `[]` | Extra command-line arguments for the operator binary. |
 | extraEnv | list | `[]` | Extra environment variables for the operator container.  This is the supported way to configure the controller process:   OPERATOR_SCOPE, OPERATOR_NAMESPACE, RUST_LOG, RUST_BACKTRACE,   OTEL_EXPORTER_OTLP_ENDPOINT, OPERATOR_WEBHOOK_ADDR,   OPERATOR_INGEST_ALLOWED_SERVICE_ACCOUNTS (comma-separated list; empty means   only `default`, and the operator's own SA is always refused). |
 | image | object | `{"digest":"","pullPolicy":"IfNotPresent","pullSecrets":[],"repository":"harbor.kubexa.tech/oss/hydradb-operator","tag":"v0.1.0"}` | Operator container image repository (registry + path). |
