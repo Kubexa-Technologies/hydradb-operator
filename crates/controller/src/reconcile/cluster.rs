@@ -971,6 +971,20 @@ fn ready_status(
 ) -> GraphClusterStatus {
     let mut conditions = live_conditions_set.to_vec();
     set_ready(&mut conditions, true, generation);
+    // A converged cluster is not stalled. `set_ready` leaves an existing
+    // `Stalled=True` untouched (it only seeds the condition when absent), so a
+    // cluster that once failed would report Ready=True AND Stalled=True
+    // forever — a lie the live cluster actually showed.
+    crate::conditions::upsert_condition(
+        &mut conditions,
+        new_condition(
+            STALLED,
+            "False",
+            hydradb_operator_api::spec::ConditionReason::Available.label(),
+            "no structural blockers",
+            generation,
+        ),
+    );
     GraphClusterStatus {
         conditions,
         observed_generation: generation,
