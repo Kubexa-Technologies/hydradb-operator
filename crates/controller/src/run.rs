@@ -91,11 +91,11 @@ async fn kind_is_served<K>(api: &kube::Api<K>) -> bool
 where
     K: kube::Resource + serde::de::DeserializeOwned + Clone + std::fmt::Debug,
 {
-    match api.list(&kube::api::ListParams::default().limit(1)).await {
-        Ok(_) => true,
-        Err(kube::Error::Api(response)) if response.code == 404 => false,
-        Err(_) => false,
-    }
+    // A 404 (CRD absent) and any other failure both mean "do not watch this":
+    // the only safe alternative to a working watch is no watch.
+    api.list(&kube::api::ListParams::default().limit(1))
+        .await
+        .is_ok()
 }
 
 /// Spawn every reconciler and the webhook receiver, returning their handles.

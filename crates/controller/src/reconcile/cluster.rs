@@ -1152,13 +1152,21 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
         &service_monitor_api_resource(),
     );
     let sm_name = service_monitor_name(&name);
-    if service_monitor_enabled(&cluster) {
-        crate::apply::apply_child(&sm_api, &desired_service_monitor(&cluster)?).await?;
-    } else if sm_api
-        .get_opt(&sm_name)
-        .await
-        .map_err(Error::from_kube_error)?
+    // A missing prometheus-operator CRD must not abort the reconcile: the
+    // ServiceMonitor is opt-in decoration, while auth/children below are
+    // required. `get_opt` returns 404 for an absent kind too, so probe first.
+    let sm_kind_served = crate::children::get_opt_tolerant(&sm_api, &sm_name)
+        .await?
         .is_some()
+        || service_monitor_enabled(&cluster) && sm_kind_is_served(&ctx, &namespace).await;
+    if service_monitor_enabled(&cluster) && sm_kind_served {
+        crate::apply::apply_child(&sm_api, &desired_service_monitor(&cluster)?).await?;
+    } else if sm_kind_served
+        && sm_api
+            .get_opt(&sm_name)
+            .await
+            .map_err(Error::from_kube_error)?
+            .is_some()
     {
         sm_api
             .delete(&sm_name, &DeleteParams::default())
@@ -1271,6 +1279,16 @@ async fn reconcile_inner(cluster: Arc<GraphCluster>, ctx: Arc<Ctx>) -> Result<Ac
     }
 
     Ok(Action::requeue(Duration::from_secs(SUCCESS_REQUEUE_SECS)))
+}
+
+/// Whether the `monitoring.coreos.com/v1` ServiceMonitor kind is served.
+async fn sm_kind_is_served(ctx: &Ctx, namespace: &str) -> bool {
+    let api: Api<DynamicObject> = Api::namespaced_with(
+        ctx.client.clone(),
+        namespace,
+        &service_monitor_api_resource(),
+    );
+    api.list(&ListParams::default().limit(1)).await.is_ok()
 }
 
 /// Scrape the indexer metrics service and derive [`IndexingStatus`].
