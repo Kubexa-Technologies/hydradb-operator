@@ -209,7 +209,7 @@ spec:
               # Kaniko builds the repo-root Dockerfile (which uses the `bin=`
               # export stage); the Rust build happens inside the Dockerfile,
               # never in this step.
-              image: ghcr.io/osscontainertools/kaniko:v1.28.5
+              image: ghcr.io/osscontainertools/kaniko:v1.29.0@sha256:0c0b6c02991bba44090fad918ae177d193e1bd3fd0ccc643e7cc1f9f1a5a373d
               workspaces:
                 # kaniko reads config.json from $DOCKER_CONFIG (/kaniko/.docker).
                 # The docker-credentials workspace defaults to
@@ -227,7 +227,19 @@ spec:
                 # destinations with a two-auth docker config, else splits it.
                 - --cache=true
                 - --cache-repo=harbor.kubexa.tech/oss/kaniko-cache
-                - --skip-tls-verify=false
+                - --cache-copy-layers=true
+                - --cache-ttl=336h
+                - --push-retry=3
+                - --image-download-retry=3
+              env:
+                - name: FF_KANIKO_PARALLEL_HASH
+                  value: "true"
+                - name: FF_KANIKO_DEFER_CACHE_PUSH
+                  value: "true"
+                - name: FF_KANIKO_ISOLATE_CACHE_PUSH
+                  value: "true"
+                - name: FF_KANIKO_RESOLVE_CACHE_KEY
+                  value: "true"
                 - --skip-tls-verify-registry=harbor.kubexa.tech
                 - --snapshot-mode=redo
               env:
