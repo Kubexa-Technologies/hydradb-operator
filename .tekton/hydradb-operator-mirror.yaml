@@ -14,7 +14,7 @@ metadata:
   name: hydradb-operator-mirror
   annotations:
     pipelinesascode.tekton.dev/max-keep-runs: "5"
-    pipelinesascode.tekton.dev/on-cel-expression: "event == 'push' && target_branch == 'main'"
+    pipelinesascode.tekton.dev/on-cel-expression: "event == 'push' && (target_branch == 'main' || target_branch.startsWith('refs/tags/v'))"
 spec:
   taskRunTemplate:
     serviceAccountName: default
@@ -64,6 +64,10 @@ spec:
             value: $(tasks.token.results.token)
           - name: branch
             value: main
+          # Tags travel with the branch. The GitHub side runs the GHCR copy in a
+          # workflow, and Actions only sees a tag event when the tag exists there.
+          - name: push-tags
+            value: "true"
         workspaces:
           - { name: source, workspace: repo }
           # needed only to unshallow: the clone is depth 1 and a shallow pack is refused
