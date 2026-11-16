@@ -126,3 +126,5 @@ HydraDB itself is **AGPL-3.0**. That distinction is deliberate and load-bearing:
   operator image.
 
 Contributions are accepted under Apache-2.0 (inbound = outbound).
+
+<!-- The GitHub copy is written by the mirror pipeline in this repository. -->
