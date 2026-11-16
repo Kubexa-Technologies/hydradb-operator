@@ -20,6 +20,66 @@ review or a merge. Issues and pull requests are read, but they can wait longer t
 in a project with paid maintainers. If something is urgent for you, say so in the issue and
 explain why. That is the one thing that changes the order.
 
+## How it fits together
+
+```mermaid
+flowchart LR
+  subgraph user["You declare"]
+    GC["GraphCluster<br/>image, object store, auth, TLS"]
+    GNP["GraphNodePool<br/>replicas, resources, cache, role"]
+    GI["GraphIndexer<br/>mode, concurrency, retention"]
+    GB["GraphBackup<br/>schedule or once"]
+    GIS["GraphIngestSource<br/>git repo or URL, schedule"]
+  end
+
+  subgraph op["hydradb-operator (this repo)"]
+    CTRL["controllers<br/>server-side apply only"]
+    API["crates/api<br/>CRD types + validation"]
+  end
+
+  subgraph children["Objects it builds"]
+    STS["StatefulSet<br/>graph nodes"]
+    DEP["Deployment<br/>indexer"]
+    SVC["Services<br/>bolt 7687, https 443, admin 9090"]
+    CM["ConfigMap<br/>engine env"]
+    SEC["Secret<br/>bearer token, generated or supplied"]
+    NP["NetworkPolicy"]
+    PDB["PodDisruptionBudget"]
+    CJ["CronJob<br/>backup, ingest"]
+  end
+
+  subgraph external["Outside the cluster"]
+    IMG["ghcr.io/hydra-db/hydradb<br/>public multi-arch engine"]
+    S3["S3-compatible object store<br/>WAL, snapshots, graph data"]
+    GIT["Git repository<br/>ingest source"]
+  end
+
+  GC --> CTRL
+  GNP --> CTRL
+  GI --> CTRL
+  GB --> CTRL
+  GIS --> CTRL
+  CTRL --- API
+  CTRL --> STS
+  CTRL --> DEP
+  CTRL --> SVC
+  CTRL --> CM
+  CTRL --> SEC
+  CTRL --> NP
+  CTRL --> PDB
+  CTRL --> CJ
+  IMG --> STS
+  IMG --> DEP
+  STS --> S3
+  DEP --> S3
+  CJ --> S3
+  CJ --> GIT
+```
+
+The operator holds no state of its own. Every reconcile reads the custom resources, computes the
+child objects, and server-side-applies them. Delete an object by hand and the next reconcile puts
+it back. Change the CR and the children follow.
+
 ## Custom resources
 
 API group `hydradb.kubexa.tech`, version `v1alpha1`, all namespaced:
