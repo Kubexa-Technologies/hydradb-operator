@@ -38,14 +38,27 @@ spec:
         workspaces:
           - { name: repo, workspace: repo }
           - { name: basic-auth, workspace: basic-auth }
-      - name: mirror
+      - name: token
         runAfter: [fetch-source]
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: github-app-token }
+            - { name: namespace, value: tekton-tasks }
+      - name: mirror
+        runAfter: [token]
         taskRef:
           resolver: cluster
           params:
             - { name: kind, value: task }
             - { name: name, value: git-mirror-push }
             - { name: namespace, value: tekton-tasks }
+        params:
+          # A minted installation token, not a stored secret: the mirror needs no
+          # durable credential and this repository refuses deploy keys entirely.
+          - name: token
+            value: $(tasks.token.results.token)
         workspaces:
           - { name: source, workspace: repo }
   workspaces:
