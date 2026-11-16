@@ -205,3 +205,4 @@ Contributions are accepted under Apache-2.0 (inbound = outbound).
 <!-- The GitHub copy is written by the mirror pipeline; it needs the App to hold Contents: write. -->
 <!-- mirror run after the installation approval -->
 <!-- mirror: token minted with jq, empty result is now a hard failure -->
+<!-- mirror: unshallow before push, credentials bound -->
