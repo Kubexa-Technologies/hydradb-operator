@@ -7,6 +7,19 @@ The operator builds every child object in Rust and server-side-applies it. It ne
 `helm`, never resolves `:latest` at runtime, and never holds a credential: credentials stay in the
 Secrets you point it at.
 
+## Using it, and contributing
+
+This operator is open source. You can use it for free, in any project, under the licence in
+`LICENSE`.
+
+Contributions are welcome, and so are issues. A bug report, a question or a pull request all
+help, and none of them needs permission first.
+
+One honest limit: this is maintained next to other work, so there is no promised timeline for a
+review or a merge. Issues and pull requests are read, but they can wait longer than they would
+in a project with paid maintainers. If something is urgent for you, say so in the issue and
+explain why. That is the one thing that changes the order.
+
 ## Custom resources
 
 API group `hydradb.kubexa.tech`, version `v1alpha1`, all namespaced:
