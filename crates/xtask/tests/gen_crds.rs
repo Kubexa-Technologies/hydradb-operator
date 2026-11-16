@@ -40,8 +40,11 @@ fn crd_dirs() -> [PathBuf; 2] {
 /// passing and passed on a retry.
 static SERIALISE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+// No lock in this helper. std::sync::Mutex is not reentrant, and the tests below already take it,
+// so a second acquire here deadlocked the whole test binary: the run sat for an hour and the
+// PipelineRun timed out instead of failing. The lock belongs to the tests, which is where the
+// shared filesystem state starts.
 fn run_gen_crds() {
-    let _guard = SERIALISE.lock().unwrap_or_else(|err| err.into_inner());
     let status = std::process::Command::new(env!("CARGO_BIN_EXE_xtask"))
         .arg("gen-crds")
         .status()
