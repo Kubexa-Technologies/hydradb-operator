@@ -55,8 +55,11 @@ spec:
             value: "{{revision}}"
           - name: repo-url
             value: http://gitea-http.gitea:3000/oss/hydradb-operator.git
+        # git-clone-repo names its checkout workspace "repo", not "source": binding
+        # the wrong name fails validation with 'declared workspace "repo" is
+        # required but has not been bound' before any step runs.
         workspaces:
-          - name: source
+          - name: repo
             workspace: repo
           - name: basic-auth
             workspace: basic-auth
