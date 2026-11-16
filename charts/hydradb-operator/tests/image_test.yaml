@@ -1,0 +1,34 @@
+suite: operator image is a single, overridable pair
+templates:
+  - deployment.yaml
+tests:
+  - it: defaults render the Harbor image with an explicit tag and no digest
+    template: deployment.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^harbor\.kubexa\.tech/oss/hydradb-operator:.+$
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: "@sha256:"
+
+  - it: repository and tag are replaced together
+    template: deployment.yaml
+    set:
+      image:
+        repository: ghcr.io/hydra-db/hydradb
+        tag: sha-9166374
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/hydra-db/hydradb:sha-9166374
+
+  - it: a digest pins the image instead of the tag
+    template: deployment.yaml
+    set:
+      image:
+        digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: "@sha256:0123456789abcdef"
