@@ -1,24 +1,56 @@
 # HydraDB Operator
 
-A [kube-rs](https://kube.rs/) operator that runs [HydraDB](https://github.com/hydra-db/hydradb) — an
-object-storage-native distributed graph database — on Kubernetes.
+> [!WARNING]
+> **Highly experimental. Not production-ready as it stands.**
+>
+> This is a working operator, and it runs a real graph database for real traffic in one cluster -
+> but it is early, the API is `v1alpha1`, and the defaults assume a lab rather than a regulated
+> environment. There is no upgrade guarantee between releases, no support contract, and no promise
+> that a CRD field keeps its meaning.
+>
+> Treat it as a starting point you are free to adapt, fork, or rebuild. If you can do better, please
+> do - that is the point of publishing it. See [Contributing](#using-it-and-contributing).
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+  <img alt="Status: experimental" src="https://img.shields.io/badge/status-experimental-orange.svg">
+  <img alt="API: v1alpha1" src="https://img.shields.io/badge/api-v1alpha1-lightgrey.svg">
+  <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-dea584.svg">
+</p>
+
+A [kube-rs](https://kube.rs/) operator that runs [HydraDB](https://github.com/hydra-db/hydradb) - an
+object-storage-native distributed graph database - on Kubernetes.
 
 The operator builds every child object in Rust and server-side-applies it. It never shells out to
 `helm`, never resolves `:latest` at runtime, and never holds a credential: credentials stay in the
 Secrets you point it at.
 
-## Using it, and contributing
+## Contents
+
+- [Custom resources](#custom-resources)
+- [Quickstart](#quickstart)
+- [Scope: what this operator is, and is not](#scope-what-this-operator-is-and-is-not)
+- [Docs](#docs)
+- [License](#license)
+
+## Contributing
 
 This operator is open source. You can use it for free, in any project, under the licence in
 `LICENSE`.
 
-Contributions are welcome, and so are issues. A bug report, a question or a pull request all
-help, and none of them needs permission first.
+Contributions are welcome, and so are issues. A bug report, a question or a pull request all help,
+and none of them needs permission first.
+
+- **Found a bug?** Open an issue with the version, the CRD spec, and what you expected.
+- **Want a feature?** Open an issue first; it is cheaper to agree on the shape than to review a
+  surprise.
+- **Sending a patch?** Keep it small, add the test that would have caught the bug, and say what you
+  verified.
 
 One honest limit: this is maintained next to other work, so there is no promised timeline for a
-review or a merge. Issues and pull requests are read, but they can wait longer than they would
-in a project with paid maintainers. If something is urgent for you, say so in the issue and
-explain why. That is the one thing that changes the order.
+review or a merge. Issues and pull requests are read, but they can wait longer than they would in a
+project with paid maintainers. If something is urgent, say so in the issue and explain why - that is
+the one thing that changes the order.
 
 ## How it fits together
 
