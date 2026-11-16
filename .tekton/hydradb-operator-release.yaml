@@ -22,6 +22,7 @@ spec:
       - name: repo
       - name: basic-auth
       - name: docker-credentials
+      - name: keys
     tasks:
       - name: fetch-source
         taskRef:
@@ -53,6 +54,58 @@ spec:
             value: oci://harbor.kubexa.tech/oss
         workspaces:
           - { name: source, workspace: repo }
+          - { name: docker-credentials, workspace: docker-credentials }
+      - name: image-refs
+        # The image tag carries a derived suffix (v<version>-<timestamp>-<sha>), so the pipeline
+        # cannot name it. Ask the registry which tags end in this commit instead of guessing.
+        runAfter: [chart]
+        taskSpec:
+          results:
+            - name: refs
+          workspaces:
+            - name: docker-credentials
+          steps:
+            - name: resolve
+              image: docker.io/alpine:3.21
+              script: |
+                #!/bin/sh
+                set -eu
+                apk add --no-cache curl jq >/dev/null
+                A=$(sed -n 's/.*"auth"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$(workspaces.docker-credentials.path)"/*.json | head -1)
+                U=$(printf %s "$A" | base64 -d | cut -d: -f1)
+                P=$(printf %s "$A" | base64 -d | cut -d: -f2-)
+                SHA=$(printf '%s' "{{revision}}" | cut -c1-7)
+                TAGS=$(curl -sS -u "$U:$P" \
+                  "https://harbor.kubexa.tech/api/v2.0/projects/oss/repositories/hydradb-operator/artifacts?page_size=100&with_tag=true" \
+                  | jq -r '.[] | .tags[]?.name' | grep -E -- "-${SHA}$" || true)
+                if [ -z "$TAGS" ]; then echo "no image tag ends in $SHA"; exit 1; fi
+                # Chart reference plus every image tag for this commit, one per line.
+                {
+                  printf 'harbor.kubexa.tech/oss/hydradb-operator:%s\n' "$(params.chart-version)"
+                  for t in $TAGS; do printf 'harbor.kubexa.tech/oss/hydradb-operator:%s\n' "$t"; done
+                } > "$(results.refs.path)"
+                cat "$(results.refs.path)"
+          params:
+            - name: chart-version
+              value: $(tasks.chart.results.chart)
+        params:
+          - name: chart-version
+            value: $(tasks.chart.results.chart)
+        workspaces:
+          - { name: docker-credentials, workspace: docker-credentials }
+      - name: sign
+        runAfter: [image-refs]
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: cosign-sign }
+            - { name: namespace, value: tekton-tasks }
+        params:
+          - name: refs
+            value: $(tasks.image-refs.results.refs)
+        workspaces:
+          - { name: keys, workspace: keys }
           - { name: docker-credentials, workspace: docker-credentials }
       - name: dispatch-ghcr
         # After the chart and the image exist, never in parallel with them: the mirror copy
@@ -100,6 +153,9 @@ spec:
     - name: docker-credentials
       secret:
         secretName: docker-config-kaniko-oss
+    - name: keys
+      secret:
+        secretName: cosign-keys
     - name: repo
       volumeClaimTemplate:
         spec:
