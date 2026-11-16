@@ -33,14 +33,24 @@ jobs:
           curl -sSL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz \
             | tar -xz -C /usr/local/bin crane
 
-      - name: Copy the chart
+      - name: Log in to both registries
         env:
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          printf '%s' "$HARBOR_PASSWORD" | helm registry login "$SRC_REGISTRY" \
+          # Both logins in one step, because crane copy needs a push credential for the
+          # destination as well as a pull credential for the source. A copy that logs in
+          # only to the source fails as unauthorized on the push.
+          printf '%s' "$GHCR_TOKEN" | crane auth login "$DST_REGISTRY" \
+            --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$HARBOR_PASSWORD" | crane auth login "$SRC_REGISTRY" \
             --username "$HARBOR_USERNAME" --password-stdin
+
+      - name: Copy the chart
+        run: |
+          set -eu
           # The chart version is the git tag without its prefix, which is what the publish
           # task writes: v0.1.6 becomes 0.1.6.
           VERSION="${GITHUB_REF_NAME#v}"
@@ -48,14 +58,8 @@ jobs:
           echo "copied chart $VERSION"
 
       - name: Copy the image tags built from this commit
-        env:
-          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
-          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
-          printf '%s' "$GHCR_TOKEN" | crane auth login "$DST_REGISTRY" --username "$GITHUB_ACTOR" --password-stdin
-          printf '%s' "$HARBOR_PASSWORD" | crane auth login "$SRC_REGISTRY" --username "$HARBOR_USERNAME" --password-stdin
           # Image tags carry the derived shape v<version>-<timestamp>-<sha>, so the release
           # tag does not name them. Ask Harbor for the list and copy what belongs to this commit.
           SHA=$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
