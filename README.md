@@ -9,7 +9,7 @@
 > that a CRD field keeps its meaning.
 >
 > Treat it as a starting point you are free to adapt, fork, or rebuild. If you can do better, please
-> do - that is the point of publishing it. See [Contributing](#using-it-and-contributing).
+> do - that is the point of publishing it. See [Contributing](#contributing).
 
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
