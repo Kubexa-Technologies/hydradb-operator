@@ -1,0 +1,62 @@
+---
+# Mirror main to the public GitHub copy.
+#
+# The credential is a deploy key minted by Terraform and delivered from OpenBao, so
+# this file holds no secret and the key can only push this one repository. It is a
+# separate PipelineRun from the build on purpose: the mirror must advance only after
+# the same revision passed, and a failed build should not publish anything.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: hydradb-operator-mirror
+  annotations:
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+    pipelinesascode.tekton.dev/on-cel-expression: "event == 'push' && target_branch == 'main'"
+spec:
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      nodeSelector:
+        site: svt
+  pipelineSpec:
+    workspaces:
+      - name: repo
+      - name: basic-auth
+    tasks:
+      - name: fetch-source
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: git-clone-repo }
+            - { name: namespace, value: tekton-tasks }
+        params:
+          - name: revision
+            value: "{{revision}}"
+          - name: repo-url
+            value: http://gitea-http.gitea:3000/oss/hydradb-operator.git
+        workspaces:
+          - { name: repo, workspace: repo }
+          - { name: basic-auth, workspace: basic-auth }
+      - name: mirror
+        runAfter: [fetch-source]
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: git-mirror-push }
+            - { name: namespace, value: tekton-tasks }
+        workspaces:
+          - { name: source, workspace: repo }
+  workspaces:
+    - name: repo
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteMany]
+          resources:
+            requests:
+              storage: 2Gi
+          storageClassName: ceph-cephfs
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"

@@ -1,0 +1,74 @@
+---
+# Publish a release when a version tag is pushed.
+#
+# Two tasks with an explicit hand-off: github-app-token mints a one-hour installation
+# token, release-publish tags and opens the GitHub Release with it. Nothing durable
+# is mounted, so a leak of this run is worth an hour at most.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: hydradb-operator-release
+  annotations:
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+    pipelinesascode.tekton.dev/on-cel-expression: "event == 'push' && startsWith(target_branch, 'v')"
+spec:
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      nodeSelector:
+        site: svt
+  pipelineSpec:
+    workspaces:
+      - name: repo
+      - name: basic-auth
+    tasks:
+      - name: fetch-source
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: git-clone-repo }
+            - { name: namespace, value: tekton-tasks }
+        params:
+          - name: revision
+            value: "{{revision}}"
+          - name: repo-url
+            value: http://gitea-http.gitea:3000/oss/hydradb-operator.git
+        workspaces:
+          - { name: repo, workspace: repo }
+          - { name: basic-auth, workspace: basic-auth }
+      - name: token
+        runAfter: [fetch-source]
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: github-app-token }
+            - { name: namespace, value: tekton-tasks }
+      - name: release
+        runAfter: [token]
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: release-publish }
+            - { name: namespace, value: tekton-tasks }
+        params:
+          - name: github-token
+            value: "$(tasks.token.results.token)"
+          - name: github-repo
+            value: Kubexa-Technologies/hydradb-operator
+        workspaces:
+          - { name: source, workspace: repo }
+  workspaces:
+    - name: repo
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteMany]
+          resources:
+            requests:
+              storage: 2Gi
+          storageClassName: ceph-cephfs
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
