@@ -17,6 +17,10 @@
 #   it belongs here. If it describes the *database*, it belongs on a CR.
 
 # -- Operator container image repository (registry + path).
+# The engine image is upstream's public multi-arch build:
+#   ghcr.io/hydra-db/hydradb   (tags: 0.4.0, 0.4, sha-<short>)
+# Override repository and tag together; the mixed-arch index means no node
+# selector is needed.
 image:
   # -- Operator container image repository (registry + path).
   repository: harbor.kubexa.tech/oss/hydradb-operator
