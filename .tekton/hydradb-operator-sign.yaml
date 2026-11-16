@@ -43,8 +43,32 @@ spec:
         workspaces:
           - { name: repo, workspace: repo }
           - { name: basic-auth, workspace: basic-auth }
-      - name: sign
+      - name: version
+        # The chart version is the git tag without its prefix, and PaC hands a tag event its full
+        # ref (refs/tags/v0.1.9). A parameter default cannot strip that, so derive it from the
+        # clone instead of guessing, and keep the shared signing task generic.
         runAfter: [fetch-source]
+        taskSpec:
+          results:
+            - name: chart-version
+          workspaces:
+            - name: source
+          steps:
+            - name: derive
+              image: docker.io/alpine:3.21
+              workingDir: $(workspaces.source.path)
+              script: |
+                #!/bin/sh
+                set -eu
+                apk add --no-cache git >/dev/null
+                tag=$(git describe --tags --exact-match 2>/dev/null || true)
+                if [ -z "$tag" ]; then echo "HEAD is not an exact tag"; exit 1; fi
+                printf '%s' "${tag#v}" > "$(results.chart-version.path)"
+                echo "chart version ${tag#v}"
+        workspaces:
+          - { name: source, workspace: repo }
+      - name: sign
+        runAfter: [version]
         taskRef:
           resolver: cluster
           params:
@@ -53,14 +77,11 @@ spec:
             - { name: namespace, value: tekton-tasks }
         params:
           - name: refs
-            # The chart tag is the git tag without its prefix. The image tag carries a derived
-            # suffix, so signing it by name is a job for a caller that knows the build tag.
-            value: "harbor.kubexa.tech/oss/hydradb-operator:$(params.chart-version)"
+            # Chart only, for now: the image tag carries a derived suffix, so signing it needs the
+            # build tag and that caller is the release pipeline, not this tag event.
+            value: "harbor.kubexa.tech/oss/hydradb-operator:$(tasks.version.results.chart-version)"
         workspaces:
           - { name: keys, workspace: keys }
-    params:
-      - name: chart-version
-        default: "{{source_branch}}"
   workspaces:
     - name: repo
       volumeClaimTemplate:
