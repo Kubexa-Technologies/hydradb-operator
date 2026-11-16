@@ -41,6 +41,9 @@ annotations:
   artifacthub.io/recommended-permissions: |
     ClusterRole hydradb-operator is required; see deploy/rbac/operator-clusterrole.yaml
   helmforge.dev/maturity: experimental
-  helmforge.dev/signed: gpg+cosign
+  # No artifact is signed yet. This annotation used to claim gpg+cosign, which was never true:
+  # nothing in the pipeline signs the chart or the image, and there is no signing key or keyless
+  # identity to verify against. It says none until a signature exists to point at.
+  helmforge.dev/signed: none
   helmforge.dev/repository: oci://harbor.kubexa.tech/oss/hydradb-operator
   helmforge.dev/engine-image: "ghcr.io/hydra-db/hydradb (multi-arch)"

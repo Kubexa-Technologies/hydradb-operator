@@ -44,8 +44,12 @@ both enabled and disabled states asserted for every optional resource).
 ## Security scan
 
 No image is published with the `:latest` tag; the Deployment test asserts a
-`v<semver>` tag. Chart signing and SBOM are tracked separately
-(see `docs/signing.md` in a later change).
+`v<semver>` tag.
+
+Nothing is signed yet. The chart and the image carry no signature and no SBOM, and
+`docs/signing.md` does not exist: this file promised a document in a later change, and the chart
+carried an annotation claiming gpg and cosign signatures, while neither was true. The annotation
+now says `none`. Signing is worth doing, and the honest starting point is that it is absent.
 
 ## Requirements
 
