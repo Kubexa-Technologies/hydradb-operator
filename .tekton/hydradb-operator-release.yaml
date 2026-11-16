@@ -21,6 +21,7 @@ spec:
     workspaces:
       - name: repo
       - name: basic-auth
+      - name: docker-credentials
     tasks:
       - name: fetch-source
         taskRef:
@@ -37,6 +38,22 @@ spec:
         workspaces:
           - { name: repo, workspace: repo }
           - { name: basic-auth, workspace: basic-auth }
+      - name: chart
+        runAfter: [fetch-source]
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: chart-publish }
+            - { name: namespace, value: tekton-tasks }
+        params:
+          - name: chart-dir
+            value: charts/hydradb-operator
+          - name: oci-repo
+            value: oci://harbor.kubexa.tech/oss
+        workspaces:
+          - { name: source, workspace: repo }
+          - { name: docker-credentials, workspace: docker-credentials }
       - name: token
         runAfter: [fetch-source]
         taskRef:
@@ -61,6 +78,9 @@ spec:
         workspaces:
           - { name: source, workspace: repo }
   workspaces:
+    - name: docker-credentials
+      secret:
+        secretName: docker-config-kaniko-oss
     - name: repo
       volumeClaimTemplate:
         spec:
