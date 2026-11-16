@@ -59,6 +59,8 @@ spec:
           # durable credential and this repository refuses deploy keys entirely.
           - name: token
             value: $(tasks.token.results.token)
+          - name: branch
+            value: main
         workspaces:
           - { name: source, workspace: repo }
   workspaces:
