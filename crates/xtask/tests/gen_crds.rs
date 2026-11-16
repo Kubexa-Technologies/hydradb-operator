@@ -31,7 +31,17 @@ fn crd_dirs() -> [PathBuf; 2] {
     ]
 }
 
+/// Serialises this file's tests.
+///
+/// Every test here runs `xtask gen-crds`, which writes the same five files into both CRD
+/// directories. Cargo runs test functions in parallel, so two of them raced: one rewrote a file
+/// while another compared it, and `gen_crds_is_idempotent` reported "changed between runs" for a
+/// generator that is deterministic. Measured 2026-11-16 in CI, where the run failed at 323/324
+/// passing and passed on a retry.
+static SERIALISE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn run_gen_crds() {
+    let _guard = SERIALISE.lock().unwrap_or_else(|err| err.into_inner());
     let status = std::process::Command::new(env!("CARGO_BIN_EXE_xtask"))
         .arg("gen-crds")
         .status()
@@ -63,6 +73,7 @@ fn parse_crd(path: &std::path::Path) -> CustomResourceDefinition {
 
 #[test]
 fn gen_crds_writes_one_file_per_kind_to_both_directories() {
+    let _guard = SERIALISE.lock().unwrap_or_else(|err| err.into_inner());
     run_gen_crds();
     for dir in crd_dirs() {
         assert_eq!(
@@ -76,6 +87,7 @@ fn gen_crds_writes_one_file_per_kind_to_both_directories() {
 
 #[test]
 fn gen_crds_is_idempotent() {
+    let _guard = SERIALISE.lock().unwrap_or_else(|err| err.into_inner());
     run_gen_crds();
     let snapshot: Vec<(PathBuf, String)> = crd_dirs()
         .iter()
@@ -96,6 +108,7 @@ fn gen_crds_is_idempotent() {
 
 #[test]
 fn every_generated_file_parses_as_a_crd_with_the_expected_group_and_kind() {
+    let _guard = SERIALISE.lock().unwrap_or_else(|err| err.into_inner());
     run_gen_crds();
     let mut kinds = BTreeSet::new();
     for dir in crd_dirs() {
