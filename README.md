@@ -21,6 +21,9 @@
 This operator runs [HydraDB](https://github.com/hydra-db/hydradb) on Kubernetes. HydraDB is a graph
 database that keeps its data in object storage. The operator is written with [kube-rs](https://kube.rs/).
 
+The project lives at [git.kubexa.tech/oss/hydradb-operator](https://git.kubexa.tech/oss/hydradb-operator).
+Issues, pull requests and CI run there. The copy on GitHub is a mirror, and it carries the releases.
+
 An operator is a program that runs inside the cluster and keeps other objects in the state you
 declare. This operator builds every child object in Rust and applies it with server-side apply. It
 never starts `helm`. It never resolves `:latest` at run time. It never holds a credential. Your
