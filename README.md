@@ -156,8 +156,9 @@ ship in the same image as the controller.
 
 ## Scope: what this operator is, and is not
 
-The operator manages **the HydraDB storage engine** — the part that is published upstream under
-AGPL-3.0. Concretely, that engine provides: durable graph storage on SlateDB over S3-compatible
+The operator manages **the HydraDB storage engine** — the part that is published upstream. Check the
+licence recorded in the upstream repository before you rely on any right to run, copy or modify it;
+the terms have changed once already. Concretely, that engine provides: durable graph storage on SlateDB over S3-compatible
 object storage, an OpenCypher query engine, GraphBLAS traversal with immutable index generations, and
 Bolt (7687) plus an HTTPS query API.
 
@@ -184,26 +185,32 @@ semantic retrieval layer, that is HydraDB's hosted service or SDK. Do not read a
 
 ## License
 
-**This operator is Apache-2.0** (see [LICENSE](LICENSE)). It links nothing from HydraDB and contains
-no HydraDB code: it deploys the operand image you name at runtime, so the two licences never mix in
-one artefact.
+**This operator is Apache-2.0** (see [LICENSE](LICENSE)). That licence covers this repository only.
+The operator links nothing from HydraDB and contains no HydraDB code: it deploys the operand image
+you name at runtime, so no licence is mixed inside one artefact.
 
-HydraDB itself is **AGPL-3.0**. That distinction is deliberate and load-bearing:
+**HydraDB itself is not open source, and did not stay under the licence it shipped with.** The
+creators have changed its terms. The earlier text here recorded AGPL-3.0 because that is what the
+repository said when this operator was written; that statement no longer holds, and it is removed
+rather than replaced with a guess. Read the licence file in the upstream repository for the current
+terms, and read it before you plan around them.
 
-- running **unmodified** HydraDB is unrestricted; AGPL's source-offer obligation (§13) attaches to a
-  *modified* version that users interact with over a network;
-- a controller that talks to HydraDB over Bolt, and manages its Kubernetes objects, is a separate
-  program at arm's length — not a derivative work;
-- if you publish a **patched** operand image, you owe the corresponding source to the people who use
-  it. This repo never does that: operand images are pulled by the cluster, never copied into the
-  operator image.
+### Where we stand
 
-Contributions are accepted under Apache-2.0 (inbound = outbound).
+We disagree with the direction upstream has taken, and the README should say so rather than imply a
+partnership that does not exist.
 
-<!-- The GitHub copy is written by the mirror pipeline in this repository. -->
+- **The licence is no longer an open-source licence in the sense the OSI defines.** A licence that
+  forbids or restricts the uses an open-source licence must permit is not open source, however it is
+  described in a README or a launch post.
+- **The public repository is not a place where work happens.** It arrives as large periodic
+  snapshots: whole trees pushed at once, with no development history to read, no issue discussion
+  that shapes the code, and no review of outside contributions. That is a distribution channel
+  dressed as a project. A code dump is not a community, and a snapshot is not a contribution.
 
-<!-- The GitHub copy is written by the mirror pipeline; it needs the App to hold Contents: write. -->
-<!-- mirror run after the installation approval -->
-<!-- mirror: token minted with jq, empty result is now a hard failure -->
-<!-- mirror: unshallow before push, credentials bound -->
-<!-- mirror run: the App now bypasses the main ruleset -->
+This operator is separate from that. It is Apache-2.0, developed in the open in this repository, and
+contributed to like any other project here. If you need the engine, you can install the image you
+choose and manage it with this operator. If you need terms you can build a business on, read the
+upstream licence carefully first.
+
+Contributions to this operator are accepted under Apache-2.0 (inbound = outbound).
