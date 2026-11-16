@@ -1,0 +1,80 @@
+---
+# Chart gate for charts/hydradb-operator. The work lives in the shared chart-verify
+# Task in talos-stack (infrastructure/controllers/tekton/tasks/task/), so this
+# repository carries no chart-specific pipeline: lint, the unit tests, the render
+# and the schema validation all come from there.
+#
+# Separate from hydradb-operator-build on purpose. A chart edit is not an image
+# change, and the image takes minutes where this takes seconds; tying them together
+# would either rebuild the operator for a values tweak or skip the chart gate when
+# only Go-free Rust changed.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: hydradb-operator-chart
+  annotations:
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "10"
+    pipelinesascode.tekton.dev/on-cel-expression: "event in ['push', 'pull_request'] && target_branch == 'main' && (files.all.exists(f, f.startsWith('charts/')) || files.all.exists(f, f == '.tekton/hydradb-operator-chart.yaml'))"
+spec:
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      nodeSelector:
+        site: svt
+  workspaces:
+    - name: repo
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: 2Gi
+          storageClassName: ceph-cephfs
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
+  pipelineSpec:
+    workspaces:
+      - name: repo
+      - name: basic-auth
+    tasks:
+      - name: fetch-source
+        taskRef:
+          resolver: cluster
+          params:
+            - name: kind
+              value: task
+            - name: name
+              value: git-clone-repo
+            - name: namespace
+              value: tekton-tasks
+        params:
+          - name: revision
+            value: "{{revision}}"
+          - name: repo-url
+            value: http://gitea-http.gitea:3000/oss/hydradb-operator.git
+        workspaces:
+          - name: source
+            workspace: repo
+          - name: basic-auth
+            workspace: basic-auth
+      - name: chart-verify
+        runAfter:
+          - fetch-source
+        taskRef:
+          resolver: cluster
+          params:
+            - name: kind
+              value: task
+            - name: name
+              value: chart-verify
+            - name: namespace
+              value: tekton-tasks
+        params:
+          - name: chart-path
+            value: charts/hydradb-operator
+        workspaces:
+          - name: source
+            workspace: repo

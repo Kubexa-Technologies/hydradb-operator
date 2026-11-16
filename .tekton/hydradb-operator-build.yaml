@@ -1,0 +1,95 @@
+---
+# hydradb-operator image. The build itself lives in the shared rust-app-build
+# Pipeline in talos-stack (infrastructure/controllers/tekton/tasks/pipeline/);
+# this file only says what to build and when. The repository is public, so the
+# Pipeline clones it over the internal Gitea service with the PaC credentials
+# and everything else - format, clippy, advisories, the workspace tests, the
+# kaniko build and the tag - comes from the shared pipeline.
+#
+# Two things this replaces, both deliberate: the inline copy of the gate, which
+# had drifted from .tekton/hydradb-operator-ci.yaml, and the inline kaniko call
+# that set --cache-copy-layers=true. That flag caches a COPY layer on the
+# instruction instead of the bytes, so a rebuild could ship the previous
+# binary under a fresh tag.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: hydradb-operator-build
+  annotations:
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
+    pipelinesascode.tekton.dev/max-keep-runs: "10"
+    pipelinesascode.tekton.dev/on-cel-expression: "event in ['push', 'pull_request'] && target_branch == 'main' && (files.all.exists(f, f.startsWith('crates/') || f.startsWith('charts/') || f == 'Cargo.toml' || f == 'Cargo.lock' || f == '.version' || f == 'Dockerfile' || f == '.tekton/hydradb-operator-build.yaml'))"
+spec:
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      nodeSelector:
+        site: svt
+  pipelineRef:
+    resolver: cluster
+    params:
+      - name: kind
+        value: pipeline
+      - name: name
+        value: rust-app-build
+      - name: namespace
+        value: tekton-tasks
+  params:
+    - name: revision
+      value: "{{revision}}"
+    - name: event
+      value: "{{event_type}}"
+    - name: repo-url
+      value: http://gitea-http.gitea:3000/oss/hydradb-operator.git
+    - name: app-path
+      value: .
+    - name: context-path
+      value: .
+    - name: dockerfile-path
+      value: Dockerfile
+    - name: image
+      value: harbor.kubexa.tech/oss/hydradb-operator
+    - name: cache-key
+      value: hydradb-operator
+    - name: lease
+      value: ci-build-hydradb-operator
+    # .version holds v0.1.0; the shared derive-tag task appends the short sha, so
+    # the tag stays v0.1.0-<sha> exactly as the HelmRelease in talos-stack expects.
+    - name: version-file
+      value: .version
+    - name: version-fallback
+      value: v0.1.0
+    - name: tag-suffix-sha
+      value: "true"
+    # The e2e crate needs go and libclang for envtest, and the shared test step
+    # does not install either. Excluding it keeps every other crate gated here;
+    # the e2e tier belongs in its own run, not in every application build.
+    - name: test-args
+      value: --workspace --locked --release --exclude hydradb-operator-e2e
+    - name: clippy-args
+      value: --workspace --all-targets
+    - name: require-live-tests
+      value: "false"
+    # The oss Harbor project has its own robot account; the shared default is the
+    # home-ops one.
+    - name: cache-repo
+      value: harbor.kubexa.tech/oss/kaniko-cache
+  workspaces:
+    - name: repo
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteMany
+          resources:
+            requests:
+              storage: 10Gi
+          storageClassName: ceph-cephfs
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
+    - name: docker-credentials
+      secret:
+        secretName: docker-config-kaniko-oss
+        items:
+          - key: config.json
+            path: config.json
