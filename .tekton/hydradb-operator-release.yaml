@@ -88,7 +88,10 @@ spec:
                 fi
                 # Chart reference plus every image tag for this commit, one per line.
                 {
-                  printf 'harbor.kubexa.tech/oss/hydradb-operator:%s\n' "$(params.chart-version)"
+                  # The chart task already returns a full reference with an oci:// prefix; prefixing
+                  # it again produced harbor.../hydradb-operator:oci://harbor.../hydradb-operator:0.1.15,
+                  # which is not a reference anything can resolve.
+                  printf '%s\n' "$(params.chart-version)" | sed -e 's|^oci://||'
                   for t in $TAGS; do printf 'harbor.kubexa.tech/oss/hydradb-operator:%s\n' "$t"; done
                 } > "$(results.refs.path)"
                 cat "$(results.refs.path)"
