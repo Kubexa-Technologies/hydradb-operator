@@ -78,7 +78,14 @@ spec:
                 TAGS=$(curl -sS -u "$U:$P" \
                   "https://harbor.kubexa.tech/api/v2.0/projects/oss/repositories/hydradb-operator/artifacts?page_size=100&with_tag=true" \
                   | jq -r '.[] | .tags[]?.name' | grep -E -- "-${SHA}$" || true)
-                if [ -z "$TAGS" ]; then echo "no image tag ends in $SHA"; exit 1; fi
+                # A tag on a commit that touched only workflow files has no image: the build's own
+                # path filter decides that, and failing here would block the chart's signature for a
+                # reason that has nothing to do with the chart. Report the absence and sign what
+                # exists; the release is still signed, and the next commit that changes code gets an
+                # image to sign too.
+                if [ -z "$TAGS" ]; then
+                  echo "no image tag ends in $SHA: signing the chart only"
+                fi
                 # Chart reference plus every image tag for this commit, one per line.
                 {
                   printf 'harbor.kubexa.tech/oss/hydradb-operator:%s\n' "$(params.chart-version)"
