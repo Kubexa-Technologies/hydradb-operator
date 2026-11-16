@@ -1,0 +1,70 @@
+# Copy the published artifacts to GitHub's registry with the workflow's own token.
+#
+# Why this and not Harbor replication: a classic PAT stored in Harbor has to be rotated by
+# hand, because GitHub has no API that mints a replacement PAT. The token Actions receives
+# is minted per run and dies with it, so nothing long-lived sits in a registry or in this
+# repository. Harbor stays the builder and the store; GHCR is the public read path.
+#
+# Pull credentials for Harbor come from the cluster's Vault through Terraform, which writes
+# them as repository secrets, so this file names them and holds no value.
+name: publish-ghcr
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  SRC_REGISTRY: harbor.kubexa.tech
+  SRC_REPO: harbor.kubexa.tech/oss/hydradb-operator
+  DST_REGISTRY: ghcr.io
+  DST_REPO: ghcr.io/kubexa-technologies/oss/hydradb-operator
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install copy tooling
+        run: |
+          set -eu
+          curl -sSL https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz \
+            | tar -xz -C /usr/local/bin crane
+
+      - name: Copy the chart
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: |
+          set -eu
+          printf '%s' "$HARBOR_PASSWORD" | helm registry login "$SRC_REGISTRY" \
+            --username "$HARBOR_USERNAME" --password-stdin
+          # The chart version is the git tag without its prefix, which is what the publish
+          # task writes: v0.1.6 becomes 0.1.6.
+          VERSION="${GITHUB_REF_NAME#v}"
+          crane copy "$SRC_REPO:$VERSION" "$DST_REPO:$VERSION"
+          echo "copied chart $VERSION"
+
+      - name: Copy the image tags built from this commit
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          printf '%s' "$GHCR_TOKEN" | crane auth login "$DST_REGISTRY" --username "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$HARBOR_PASSWORD" | crane auth login "$SRC_REGISTRY" --username "$HARBOR_USERNAME" --password-stdin
+          # Image tags carry the derived shape v<version>-<timestamp>-<sha>, so the release
+          # tag does not name them. Ask Harbor for the list and copy what belongs to this commit.
+          SHA=$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
+          TAGS=$(crane ls "$SRC_REPO" | grep -E -- "-${SHA}$" || true)
+          if [ -z "$TAGS" ]; then
+            echo "no image tag for $SHA yet; the build may still be running"
+            exit 0
+          fi
+          for t in $TAGS; do
+            echo "copying $t"
+            crane copy "$SRC_REPO:$t" "$DST_REPO:$t"
+          done
