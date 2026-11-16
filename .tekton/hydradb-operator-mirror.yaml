@@ -5,6 +5,9 @@
 # this file holds no secret and the key can only push this one repository. It is a
 # separate PipelineRun from the build on purpose: the mirror must advance only after
 # the same revision passed, and a failed build should not publish anything.
+#
+# The Task in talos-stack resolves the branch from a parameter: a detached checkout has
+# no branch of its own, and `git rev-parse --abbrev-ref HEAD` there answers "HEAD".
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
