@@ -43,3 +43,4 @@ annotations:
   helmforge.dev/maturity: experimental
   helmforge.dev/signed: gpg+cosign
   helmforge.dev/repository: oci://harbor.kubexa.tech/oss/hydradb-operator
+  helmforge.dev/engine-image: "ghcr.io/hydra-db/hydradb (multi-arch)"
