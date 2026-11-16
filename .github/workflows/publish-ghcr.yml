@@ -62,7 +62,11 @@ jobs:
           # The chart version is the git tag without its prefix, which is what the publish
           # task writes: v0.1.6 becomes 0.1.6.
           # A dispatch carries the tag in its payload; a manual run carries it in the input.
+          # A dispatch from Tekton carries the full ref (refs/tags/v0.1.16), because that is what
+          # PaC hands a tag event. Strip the ref prefix first, then the version prefix, or the tag
+          # becomes an unparsable "oss/hydradb-operator:refs/tags/v0.1.16".
           REF="${{ github.event.client_payload.tag || github.event.inputs.tag }}"
+          REF="${REF#refs/tags/}"
           VERSION="${REF#v}"
           crane copy "$SRC_REPO:$VERSION" "$DST_REPO:$VERSION"
           echo "copied chart $VERSION"
