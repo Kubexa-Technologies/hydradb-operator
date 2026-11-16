@@ -117,6 +117,24 @@ spec:
         workspaces:
           - { name: keys, workspace: keys }
           - { name: docker-credentials, workspace: docker-credentials }
+      - name: dispatch-sign
+        # The keyless GitHub signing path listens for this event and has never been triggered.
+        runAfter: [image-refs]
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: github-dispatch }
+            - { name: namespace, value: tekton-tasks }
+        params:
+          - name: github-repo
+            value: Kubexa-Technologies/hydradb-operator
+          - name: github-token
+            value: $(tasks.token.results.token)
+          - name: event-type
+            value: sign-artifacts
+          - name: payload
+            value: '{"refs":"$(tasks.image-refs.results.refs)"}'
       - name: dispatch-ghcr
         # After the chart and the image exist, never in parallel with them: the mirror copy
         # reads both from Harbor, and a copy that starts first copies nothing.
