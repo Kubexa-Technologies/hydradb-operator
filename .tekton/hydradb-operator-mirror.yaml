@@ -66,6 +66,8 @@ spec:
             value: main
         workspaces:
           - { name: source, workspace: repo }
+          # needed only to unshallow: the clone is depth 1 and a shallow pack is refused
+          - { name: basic-auth, workspace: basic-auth }
   workspaces:
     - name: repo
       volumeClaimTemplate:
