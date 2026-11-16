@@ -1,0 +1,57 @@
+name: cosign-sign
+description: >-
+  Sign OCI artifacts by digest with cosign keyless, then verify the signature with the identity
+  that produced it. Keyless here means the OIDC token GitHub mints for this run: there is no key
+  and nothing to rotate, which is the only reason this credential choice survives contact with
+  reality.
+inputs:
+  refs:
+    description: Newline-separated artifact references, each already tagged or digest-pinned.
+    required: true
+  identity-regexp:
+    description: >-
+      Expected certificate identity. Defaults to any workflow in this repository, which is the
+      narrowest claim GitHub can make about a reusable workflow.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install cosign
+      shell: bash
+      env:
+        COSIGN_VERSION: v2.4.1
+      run: |
+        set -eu
+        curl -sSLO "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+        install -m 0755 cosign-linux-amd64 /usr/local/bin/cosign
+        cosign version
+
+    - name: Sign and verify
+      shell: bash
+      env:
+        REFS: ${{ inputs.refs }}
+        IDENTITY_REGEXP: ${{ inputs.identity-regexp }}
+        REPO: ${{ github.repository }}
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+      run: |
+        set -eu
+        IDENTITY="${IDENTITY_REGEXP:-https://github.com/${REPO}/}"
+        echo "signing with identity ${WORKFLOW_REF}"
+        printf '%s\n' "$REFS" | while IFS= read -r ref; do
+          [ -z "$ref" ] && continue
+          # Sign the digest, never the tag: a tag can move, and a signature over a moving name
+          # proves nothing about what a reader pulls later.
+          digest=$(cosign triangulate --type digest "$ref" 2>/dev/null || true)
+          if [ -z "$digest" ]; then
+            echo "cannot resolve a digest for $ref"; exit 1
+          fi
+          cosign sign --yes "$ref@${digest#sha256:}" 2>/dev/null || cosign sign --yes "$digest"
+          # Verify with the same claim the reader will check, so a signature that only this job
+          # can validate never counts as success.
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$digest" >/dev/null
+          echo "signed and verified $digest"
+        done
