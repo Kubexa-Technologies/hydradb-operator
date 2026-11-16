@@ -27,7 +27,8 @@ tests:
     template: deployment.yaml
     set:
       image:
-        digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        # The chart schema takes the bare digest, which it prefixes itself.
+        digest: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     asserts:
       - matchRegex:
           path: spec.template.spec.containers[0].image
