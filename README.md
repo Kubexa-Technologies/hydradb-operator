@@ -3,13 +3,13 @@
 > [!WARNING]
 > **Highly experimental. Not production-ready as it stands.**
 >
-> This is a working operator, and it runs a real graph database for real traffic in one cluster -
-> but it is early, the API is `v1alpha1`, and the defaults assume a lab rather than a regulated
-> environment. There is no upgrade guarantee between releases, no support contract, and no promise
-> that a CRD field keeps its meaning.
+> This operator runs a real graph database for real traffic in one cluster. It is early work. The
+> API is `v1alpha1`. The defaults assume a lab, not a regulated environment. There is no upgrade
+> guarantee between releases, no support contract, and no promise that a CRD field keeps its
+> meaning.
 >
-> Treat it as a starting point you are free to adapt, fork, or rebuild. If you can do better, please
-> do - that is the point of publishing it. See [Contributing](#contributing).
+> Treat this code as a starting point. You can adapt it, fork it, or rebuild it. If you can do
+> better, please do. That is why we publish it.
 
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
@@ -18,15 +18,18 @@
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-dea584.svg">
 </p>
 
-A [kube-rs](https://kube.rs/) operator that runs [HydraDB](https://github.com/hydra-db/hydradb) - an
-object-storage-native distributed graph database - on Kubernetes.
+This operator runs [HydraDB](https://github.com/hydra-db/hydradb) on Kubernetes. HydraDB is a graph
+database that keeps its data in object storage. The operator is written with [kube-rs](https://kube.rs/).
 
-The operator builds every child object in Rust and server-side-applies it. It never shells out to
-`helm`, never resolves `:latest` at runtime, and never holds a credential: credentials stay in the
-Secrets you point it at.
+An operator is a program that runs inside the cluster and keeps other objects in the state you
+declare. This operator builds every child object in Rust and applies it with server-side apply. It
+never starts `helm`. It never resolves `:latest` at run time. It never holds a credential. Your
+credentials stay in the Secrets that you name.
 
 ## Contents
 
+- [Contributing](#contributing)
+- [How it fits together](#how-it-fits-together)
 - [Custom resources](#custom-resources)
 - [Quickstart](#quickstart)
 - [Scope: what this operator is, and is not](#scope-what-this-operator-is-and-is-not)
@@ -35,22 +38,20 @@ Secrets you point it at.
 
 ## Contributing
 
-This operator is open source. You can use it for free, in any project, under the licence in
+This operator is open source. You can use it in any project, for no cost, under the license in
 `LICENSE`.
 
-Contributions are welcome, and so are issues. A bug report, a question or a pull request all help,
-and none of them needs permission first.
+You can send a bug report, a question, or a pull request. You do not need permission first.
 
-- **Found a bug?** Open an issue with the version, the CRD spec, and what you expected.
-- **Want a feature?** Open an issue first; it is cheaper to agree on the shape than to review a
-  surprise.
-- **Sending a patch?** Keep it small, add the test that would have caught the bug, and say what you
-  verified.
+- If you found a bug, open an issue. Give the version, the CRD spec, and the result you expected.
+- If you want a feature, open an issue first. We can agree on the shape before you write code.
+- If you send a patch, keep it small. Add the test that would have caught the bug. Say what you
+  tested.
 
-One honest limit: this is maintained next to other work, so there is no promised timeline for a
-review or a merge. Issues and pull requests are read, but they can wait longer than they would in a
-project with paid maintainers. If something is urgent, say so in the issue and explain why - that is
-the one thing that changes the order.
+There is one limit that we state plainly. This project continues next to other work. We cannot
+promise a date for a review or a merge. We read issues and pull requests. They can wait longer than
+they would in a project with paid maintainers. If your problem is urgent, say so in the issue and
+explain why. That is the one thing that changes the order.
 
 ## How it fits together
 
@@ -108,23 +109,27 @@ flowchart LR
   CJ --> GIT
 ```
 
-The operator holds no state of its own. Every reconcile reads the custom resources, computes the
-child objects, and server-side-applies them. Delete an object by hand and the next reconcile puts
-it back. Change the CR and the children follow.
+The operator holds no state of its own. Each reconcile reads the custom resources, computes the child
+objects, and applies them with server-side apply. A reconcile is one pass of the control loop. If you
+delete a child object by hand, the next reconcile puts it back. If you change a custom resource, the
+children follow.
 
 ## Custom resources
 
-API group `hydradb.kubexa.tech`, version `v1alpha1`, all namespaced:
+The API group is `hydradb.kubexa.tech`. The version is `v1alpha1`. All kinds are namespaced.
 
 | Kind | Short | Purpose |
 |------|-------|---------|
 | **GraphCluster** | `hgc` | One graph: image, object store, auth, TLS, ports, tuning, optional restore. |
 | **GraphNodePool** | `hgnp` | A pool of graph nodes: size, resources, cache, role (writer/reader), optional HPA. |
 | **GraphIndexer** | `hgi` | Index builder: build mode, concurrency, WAL-tail caps, retention of generations. |
-| **GraphBackup** | `hgb` | Scheduled or one-shot copies of the graph's object-store data. |
-| **GraphIngestSource** | `hgis` | Scheduled or webhook-triggered ingestion runs from a git repo or URL. |
+| **GraphBackup** | `hgb` | Scheduled or one-shot copies of the graph data in object storage. |
+| **GraphIngestSource** | `hgis` | Scheduled or webhook-triggered ingestion runs from a git repository or a URL. |
 
 ## Quickstart
+
+You have two choices. Install the CRDs only and manage the operator yourself. Or install the
+operator chart, which also installs the CRDs.
 
 ```sh
 # CRDs only, if you manage the operator yourself
@@ -135,12 +140,12 @@ kubectl apply -f deploy/crds/
 helm install hydradb-operator oci://harbor.kubexa.tech/oss/hydradb-operator --version <version>
 ```
 
-Then a minimal cluster — `image`, `graph` and `objectStore` are required; there is no hidden default
-for any of them:
+The chart is an OCI artifact in the registry of our own cluster. A copy on GHCR follows when
+registry replication is on.
 
-`harbor.kubexa.tech/oss/hydradb` appears elsewhere in this repository only because the cluster
-that runs these tests mirrors the upstream image internally. It is not part of the project and is not
-an image you should pull: use `ghcr.io/hydra-db/hydradb`.
+If you want a minimal running graph, apply the objects below.
+
+Three fields are required: `image`, `graph`, and `objectStore`. None of them has a default.
 
 ```yaml
 apiVersion: hydradb.kubexa.tech/v1alpha1
@@ -189,66 +194,71 @@ spec:
   replicas: 1
 ```
 
-`kubectl hydradb status example`, `endpoints`, `logs`, `doctor`, `scale`, `backup` and `restore`
-ship in the same image as the controller.
+The `harbor.kubexa.tech/oss/hydradb` path appears in this repository because our test cluster
+mirrors the upstream image inside. That path is not part of the project. Do not pull it. Pull
+`ghcr.io/hydra-db/hydradb` instead.
+
+The command line for the operator ships in the same image as the controller. Run `kubectl hydradb`
+with `status`, `endpoints`, `logs`, `doctor`, `scale`, `backup`, or `restore`.
 
 ## Scope: what this operator is, and is not
 
-The operator manages **the HydraDB storage engine** — the part that is published upstream. Check the
-licence recorded in the upstream repository before you rely on any right to run, copy or modify it;
-the terms have changed once already. Concretely, that engine provides: durable graph storage on SlateDB over S3-compatible
-object storage, an OpenCypher query engine, GraphBLAS traversal with immutable index generations, and
-Bolt (7687) plus an HTTPS query API.
+The operator manages the HydraDB storage engine. That engine is the part that upstream publishes.
+Read the license file in the upstream repository before you rely on a right to run, copy, or modify
+it. The terms changed once already.
 
-It does **not** provide a semantic or retrieval layer. HydraDB's hosted product additionally markets
-entity/relationship extraction, a retrieval orchestrator, hybrid semantic + BM25 retrieval and
-reranking; **none of that is in the open-source repository** (there is no embedding, BM25, rerank or
-entity-extraction code in it — its only "vector" type is the GraphBLAS FFI). This operator therefore
-exposes engine knobs only, and its ingestion contract writes Cypher into the graph — there is no
-vector or full-text store to write into.
+The engine gives you four things. It keeps durable graph data on SlateDB over S3-compatible object
+storage. It answers OpenCypher queries. It traverses with GraphBLAS and keeps each index generation
+immutable. It serves Bolt on port 7687 and an HTTPS query API.
 
-Practical consequence: this project gives you a **self-hostable graph database**. If you need the
-semantic retrieval layer, that is HydraDB's hosted service or SDK. Do not read any field in
-`tuning` or `GraphIngestSource` as reaching past the engine — none of them do.
+The operator does not give you a semantic or a retrieval layer. The hosted HydraDB product also
+advertises entity extraction, a retrieval orchestrator, hybrid semantic and BM25 retrieval, and
+reranking. None of that code is in the open repository. There is no embedding code, no BM25 code, no
+rerank code, and no entity-extraction code. The only vector type in the engine is the GraphBLAS FFI
+binding.
+
+The result is simple. This project gives you a graph database that you can host yourself. If you
+need the retrieval layer, use the hosted HydraDB service or its SDK. Do not read a field in `tuning`
+or in `GraphIngestSource` as control over anything outside the engine. None of them reach that far.
 
 ## Docs
 
-- `docs/backup.md` — backup, restore and ingest contracts (the `HYDRADB_*` variables, safety
-  ordering, webhook authentication).
-- `docs/crd-*.md` — generated CRD reference.
-- `docs/decisions/` — ADRs, including the proven dual-registry image push.
-- `docs/backup.md` §4 — why there is no vector/BM25 store to ingest into.
-- `CONTRIBUTING.md` — build, test, submit.
-- `SECURITY.md` — how to report vulnerabilities.
+- `docs/backup.md`: the contracts for backup, restore, and ingestion, including the `HYDRADB_*`
+  variables, the safety order, and webhook authentication.
+- `docs/crd-*.md`: the generated reference for the custom resources.
+- `docs/decisions/`: the architecture decisions, including the proven dual-registry image push.
+- `docs/backup.md` section 4: why there is no vector store and no BM25 store to write into.
+- `CONTRIBUTING.md`: how to build, test, and submit a change.
+- `SECURITY.md`: how to report a vulnerability.
 
 ## License
 
-**This operator is Apache-2.0** (see [LICENSE](LICENSE)). That licence covers this repository only.
-The operator links nothing from HydraDB and contains no HydraDB code: it deploys the operand image
-you name at runtime, so no licence is mixed inside one artefact.
+This operator is Apache-2.0. See [LICENSE](LICENSE). That license covers this repository only. The
+operator links nothing from HydraDB and contains no HydraDB code. It deploys the operand image that
+you name at run time. The operand is the database process that the operator starts. The two licenses
+therefore never mix inside one artifact.
 
-**HydraDB itself is not open source, and did not stay under the licence it shipped with.** The
-creators have changed its terms. The earlier text here recorded AGPL-3.0 because that is what the
-repository said when this operator was written; that statement no longer holds, and it is removed
-rather than replaced with a guess. Read the licence file in the upstream repository for the current
-terms, and read it before you plan around them.
+HydraDB itself is not open source, and it did not stay under the license that it shipped with. The
+creators changed its terms. Earlier text in this file recorded AGPL-3.0 because the repository said
+so when we wrote the operator. That statement no longer holds, so we removed it. We did not replace
+it with a guess. Read the license file in the upstream repository for the current terms, and read it
+before you plan around them.
 
-### Where we stand
-
-We disagree with the direction upstream has taken, and the README should say so rather than imply a
+We disagree with the direction that upstream took, and this file says so. It must not suggest a
 partnership that does not exist.
 
-- **The licence is no longer an open-source licence in the sense the OSI defines.** A licence that
-  forbids or restricts the uses an open-source licence must permit is not open source, however it is
-  described in a README or a launch post.
-- **The public repository is not a place where work happens.** It arrives as large periodic
-  snapshots: whole trees pushed at once, with no development history to read, no issue discussion
-  that shapes the code, and no review of outside contributions. That is a distribution channel
-  dressed as a project. A code dump is not a community, and a snapshot is not a contribution.
+- The license is no longer an open-source license in the sense that the OSI defines. A license that
+  forbids a use that an open-source license must permit is not open source, whatever a README or a
+  launch post calls it.
+- The public repository is not a place where work happens. It arrives as large snapshots at long
+  intervals. Whole trees appear at once. There is no development history to read, no issue
+  discussion that shapes the code, and no review of changes from outside. That is a distribution
+  channel that looks like a project. A dump of code is not a community, and a snapshot is not a
+  contribution.
 
-This operator is separate from that. It is Apache-2.0, developed in the open in this repository, and
-contributed to like any other project here. If you need the engine, you can install the image you
-choose and manage it with this operator. If you need terms you can build a business on, read the
-upstream licence carefully first.
+This operator is separate from all of that. It is Apache-2.0. We develop it in the open in this
+repository, and you can contribute to it like any other project here. If you need the engine, install
+the image that you choose and manage it with this operator. If you need terms that you can build a
+business on, read the upstream license first.
 
-Contributions to this operator are accepted under Apache-2.0 (inbound = outbound).
+We accept contributions to this operator under Apache-2.0. Inbound terms equal outbound terms.
