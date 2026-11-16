@@ -66,8 +66,12 @@ spec:
     # the e2e tier belongs in its own run, not in every application build.
     - name: test-args
       value: --workspace --locked --release --exclude hydradb-operator-e2e
+    # The e2e crate is excluded here too, and for the same reason: its envtest
+    # dependency runs `go build` from a build script, and the shared verify step
+    # has no go toolchain - it failed as "Go build failed: No such file or
+    # directory" while checking an unrelated crate.
     - name: clippy-args
-      value: --workspace --all-targets
+      value: --workspace --all-targets --exclude hydradb-operator-e2e
     - name: require-live-tests
       value: "false"
     # The oss Harbor project has its own robot account; the shared default is the
