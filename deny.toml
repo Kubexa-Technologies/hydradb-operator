@@ -10,6 +10,7 @@ allow = [
   "Unicode-3.0",
   "Zlib", # foldhash via kube's rustls/tower stack (hashbrown)
   "CDLA-Permissive-2.0", # webpki-root-certs via rustls (kube client TLS roots)
+  "Apache-2.0 WITH LLVM-exception", # ar_archive_writer, pulled in by the LLVM/bitcode toolchain deps
 ]
 
 [bans]
