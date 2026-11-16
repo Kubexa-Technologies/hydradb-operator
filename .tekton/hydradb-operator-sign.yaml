@@ -1,0 +1,78 @@
+---
+# Sign the release artifacts from the cluster, with the cosign keypair that Vault delivers.
+#
+# Why a second signing path exists at all: Fulcio only issues certificates for OIDC issuers in its
+# own configuration, and our Zitadel issuer is not one of them unless we run a private Fulcio. So
+# the GitHub workflow signs keyless, and this pipeline signs with a key. Both sign the digest, so a
+# signature from either path can be checked with `cosign verify` and a moved tag cannot masquerade
+# as a signed release.
+#
+# Dispatched from the release pipeline for the same ordering reason as the GHCR copy: signing
+# something that does not exist yet just fails slowly.
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: hydradb-operator-sign
+  annotations:
+    pipelinesascode.tekton.dev/max-keep-runs: "5"
+    pipelinesascode.tekton.dev/on-cel-expression: "event == 'push' && target_branch.startsWith('refs/tags/v')"
+spec:
+  taskRunTemplate:
+    serviceAccountName: default
+    podTemplate:
+      nodeSelector:
+        site: svt
+  pipelineSpec:
+    workspaces:
+      - name: repo
+      - name: basic-auth
+      - name: keys
+    tasks:
+      - name: fetch-source
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: git-clone-repo }
+            - { name: namespace, value: tekton-tasks }
+        params:
+          - name: revision
+            value: "{{revision}}"
+          - name: repo-url
+            value: http://gitea-http.gitea:3000/oss/hydradb-operator.git
+        workspaces:
+          - { name: repo, workspace: repo }
+          - { name: basic-auth, workspace: basic-auth }
+      - name: sign
+        runAfter: [fetch-source]
+        taskRef:
+          resolver: cluster
+          params:
+            - { name: kind, value: task }
+            - { name: name, value: cosign-sign }
+            - { name: namespace, value: tekton-tasks }
+        params:
+          - name: refs
+            # The chart tag is the git tag without its prefix. The image tag carries a derived
+            # suffix, so signing it by name is a job for a caller that knows the build tag.
+            value: "harbor.kubexa.tech/oss/hydradb-operator:$(params.chart-version)"
+        workspaces:
+          - { name: keys, workspace: keys }
+    params:
+      - name: chart-version
+        default: "{{source_branch}}"
+  workspaces:
+    - name: repo
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteMany]
+          resources:
+            requests:
+              storage: 2Gi
+          storageClassName: ceph-cephfs
+    - name: basic-auth
+      secret:
+        secretName: "{{ git_auth_secret }}"
+    - name: keys
+      secret:
+        secretName: cosign-keys
