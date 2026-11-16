@@ -10,8 +10,16 @@
 name: publish-ghcr
 
 on:
-  push:
-    tags: ["v*"]
+  # The dispatch arrives from the Tekton release pipeline after the image and the chart exist,
+  # so this workflow never races the build for its own input. workflow_dispatch stays available
+  # for a manual re-copy of one tag.
+  repository_dispatch:
+    types: [ghcr-copy]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to copy, for example v0.1.8
+        required: true
 
 permissions:
   contents: read
@@ -53,7 +61,9 @@ jobs:
           set -eu
           # The chart version is the git tag without its prefix, which is what the publish
           # task writes: v0.1.6 becomes 0.1.6.
-          VERSION="${GITHUB_REF_NAME#v}"
+          # A dispatch carries the tag in its payload; a manual run carries it in the input.
+          REF="${{ github.event.client_payload.tag || github.event.inputs.tag }}"
+          VERSION="${REF#v}"
           crane copy "$SRC_REPO:$VERSION" "$DST_REPO:$VERSION"
           echo "copied chart $VERSION"
 
@@ -62,11 +72,14 @@ jobs:
           set -eu
           # Image tags carry the derived shape v<version>-<timestamp>-<sha>, so the release
           # tag does not name them. Ask Harbor for the list and copy what belongs to this commit.
-          SHA=$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
+          # The payload carries the full commit, so the image tag suffix is the same short sha
+          # the build wrote, not the sha of the mirror commit the workflow checks out.
+          FULL_SHA="${{ github.event.client_payload.sha }}"
+          SHA=$(printf '%s' "${FULL_SHA:-$GITHUB_SHA}" | cut -c1-7)
           TAGS=$(crane ls "$SRC_REPO" | grep -E -- "-${SHA}$" || true)
           if [ -z "$TAGS" ]; then
-            echo "no image tag for $SHA yet; the build may still be running"
-            exit 0
+            echo "no image tag ends in $SHA; the build did not publish one"
+            exit 1
           fi
           for t in $TAGS; do
             echo "copying $t"
