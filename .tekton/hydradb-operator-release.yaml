@@ -10,7 +10,7 @@ metadata:
   name: hydradb-operator-release
   annotations:
     pipelinesascode.tekton.dev/max-keep-runs: "5"
-    pipelinesascode.tekton.dev/on-cel-expression: "event == 'push' && startsWith(target_branch, 'refs/tags/v')"
+    pipelinesascode.tekton.dev/on-cel-expression: "event == 'push' && target_branch.startsWith('refs/tags/v')"
 spec:
   taskRunTemplate:
     serviceAccountName: default
