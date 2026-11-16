@@ -98,12 +98,17 @@ API group `hydradb.kubexa.tech`, version `v1alpha1`, all namespaced:
 # CRDs only, if you manage the operator yourself
 kubectl apply -f deploy/crds/
 
-# or the whole thing from the Harbor oss project
+# or the operator chart (OCI). A GHCR copy follows once registry replication is on,
+# so the chart currently lives in this cluster's own registry.
 helm install hydradb-operator oci://harbor.kubexa.tech/oss/hydradb-operator --version <version>
 ```
 
 Then a minimal cluster — `image`, `graph` and `objectStore` are required; there is no hidden default
 for any of them:
+
+`harbor.kubexa.tech/oss/hydradb` appears elsewhere in this repository only because the cluster
+that runs these tests mirrors the upstream image internally. It is not part of the project and is not
+an image you should pull: use `ghcr.io/hydra-db/hydradb`.
 
 ```yaml
 apiVersion: hydradb.kubexa.tech/v1alpha1
@@ -113,8 +118,9 @@ metadata:
   namespace: default
 spec:
   image:
-    repository: harbor.kubexa.tech/oss/hydradb
-    tag: v0.1.0
+    # The engine image upstream publishes. Pull it from GHCR, not from our mirror.
+    repository: ghcr.io/hydra-db/hydradb
+    tag: <engine tag>
   graph:
     namespace: tenant
     id: default
