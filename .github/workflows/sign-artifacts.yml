@@ -1,0 +1,45 @@
+# Sign what the release produced, keyless, with the token this run is given.
+#
+# Triggered by a repository_dispatch from the Tekton release pipeline for the same reason the GHCR
+# copy is: the artifacts must exist before they are signed, and a tag push cannot know that they do.
+name: sign-artifacts
+
+on:
+  repository_dispatch:
+    types: [sign-artifacts]
+  workflow_dispatch:
+    inputs:
+      refs:
+        description: Newline-separated artifact references to sign
+        required: true
+
+permissions:
+  contents: read
+  packages: read
+  id-token: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve what to sign
+        id: refs
+        env:
+          DISPATCH_REFS: ${{ github.event.client_payload.refs }}
+          MANUAL_REFS: ${{ github.event.inputs.refs }}
+        run: |
+          set -eu
+          REFS="${DISPATCH_REFS:-$MANUAL_REFS}"
+          if [ -z "$REFS" ]; then echo "no references to sign"; exit 1; fi
+          {
+            echo 'refs<<EOF'
+            printf '%s\n' "$REFS"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$REFS"
+
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/cosign-sign
+        with:
+          refs: ${{ steps.refs.outputs.refs }}
