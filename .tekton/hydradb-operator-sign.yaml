@@ -27,6 +27,7 @@ spec:
       - name: repo
       - name: basic-auth
       - name: keys
+      - name: docker-credentials
     tasks:
       - name: fetch-source
         taskRef:
@@ -82,6 +83,8 @@ spec:
             value: "harbor.kubexa.tech/oss/hydradb-operator:$(tasks.version.results.chart-version)"
         workspaces:
           - { name: keys, workspace: keys }
+          # the oss project is private, so the digest lookup needs the same robot the chart push uses
+          - { name: docker-credentials, workspace: docker-credentials }
   workspaces:
     - name: repo
       volumeClaimTemplate:
@@ -97,3 +100,6 @@ spec:
     - name: keys
       secret:
         secretName: cosign-keys
+    - name: docker-credentials
+      secret:
+        secretName: docker-config-kaniko-oss
