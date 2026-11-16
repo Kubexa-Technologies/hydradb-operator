@@ -15,6 +15,11 @@
 //! (`~/.local/share/kubebuilder-envtest`), honouring `KUBEBUILDER_ASSETS`
 //! when set. The build itself needs Go + libclang (rust2go bindgen).
 
+// Gated behind the envtest-tests feature: the suite compiles envtest, whose build
+// script shells out to "go build", so it must not be part of a default workspace
+// build. Run it with: cargo test -p hydradb-operator --features envtest-tests
+#![cfg(feature = "envtest-tests")]
+
 use std::sync::Arc;
 use std::time::Duration;
 

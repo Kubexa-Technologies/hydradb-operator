@@ -12,6 +12,11 @@ name = "hydradb-operator"
 path = "src/main.rs"
 
 [features]
+# The envtest integration suite needs Go and libclang at build time: its envtest
+# dependency runs "go build" from a build script. A default build therefore has
+# to stay free of it, or every cargo gate in CI dies with
+# "Go build failed: No such file or directory" before a single test runs.
+envtest-tests = ["dep:envtest"]
 otlp = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
@@ -43,8 +48,11 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 
+[dependencies.envtest]
+workspace = true
+optional = true
+
 [dev-dependencies]
 tower = { workspace = true }
 tower-test.workspace = true
-envtest.workspace = true
 http = "1"
