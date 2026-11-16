@@ -206,3 +206,4 @@ Contributions are accepted under Apache-2.0 (inbound = outbound).
 <!-- mirror run after the installation approval -->
 <!-- mirror: token minted with jq, empty result is now a hard failure -->
 <!-- mirror: unshallow before push, credentials bound -->
+<!-- mirror run: the App now bypasses the main ruleset -->
